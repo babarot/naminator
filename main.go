@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +15,8 @@ import (
 )
 
 type Option struct {
-	ParentDir string `short:"d" long:"parent-dir" description:"Target dir to move renamed photo" required:"false" default:"."`
+	ParentDir string `short:"d" long:"parent-dir" description:"Parent directory path to move renamed photos" required:"false" default:"."`
+	Dryrun    bool   `short:"n" long:"dryrun" description:"Displays the operations that would be performed using the specified command without actually running them" required:"false" default:"."`
 }
 
 type Photo struct {
@@ -31,7 +33,7 @@ func getPhotos(ctx context.Context, files []string) ([]Photo, error) {
 	for _, file := range files {
 		file := file
 		eg.Go(func() error {
-			photo, err := exif(file)
+			photo, err := analyzeExifdata(file)
 			if err != nil {
 				return fmt.Errorf("%s: failed to get EXIF data: %w", file, err)
 			}
@@ -83,21 +85,23 @@ func main() {
 	}
 
 	for i, photo := range photos {
-		newName := fmt.Sprintf("%s-%03d.%s",
+		newPath := filepath.Join(opt.ParentDir, fmt.Sprintf("%s-%03d.%s",
 			photo.CreatedAt.Format("2006-01-02"),
 			i+1,
 			photo.Extension,
-		)
-		moveTo := filepath.Join(opt.ParentDir, newName)
-		fmt.Printf("[INFO] Renaming %q to %q\n", photo.Path, moveTo)
-
-		if err := os.Rename(photo.Path, moveTo); err != nil {
+		))
+		if opt.Dryrun {
+			fmt.Printf("[INFO] (dryrun): Renaming %q to %q\n", photo.Path, newPath)
+			continue
+		}
+		fmt.Printf("[INFO] Renaming %q to %q\n", photo.Path, newPath)
+		if err := os.Rename(photo.Path, newPath); err != nil {
 			panic(err)
 		}
 	}
 }
 
-func exif(file string) (Photo, error) {
+func analyzeExifdata(file string) (Photo, error) {
 	et, err := exiftool.NewExiftool()
 	if err != nil {
 		return Photo{}, fmt.Errorf("failed to run exiftool: %w", err)
@@ -105,6 +109,11 @@ func exif(file string) (Photo, error) {
 	defer et.Close()
 
 	fileInfos := et.ExtractMetadata(file)
+	if len(fileInfos) == 0 {
+		return Photo{}, errors.New("failed to extract metadata")
+	}
+	// ExtractMetadata can deal with multiple files at once but this function only uses one argument
+	// so it's enough to reference the first element in fileInfos.
 	fileInfo := fileInfos[0]
 
 	if fileInfo.Err != nil {
@@ -115,18 +124,22 @@ func exif(file string) (Photo, error) {
 	if err != nil {
 		return Photo{}, fmt.Errorf("error on 'FileName': %w", err)
 	}
+
 	dateTime, err := fileInfo.GetString("SubSecDateTimeOriginal") // Use it instead of DateTimeOriginal
 	if err != nil {
 		return Photo{}, fmt.Errorf("error on 'SubSecDateTimeOriginal': %w", err)
 	}
+
 	sourceFile, err := fileInfo.GetString("SourceFile")
 	if err != nil {
 		return Photo{}, fmt.Errorf("error on 'SourceFile': %w", err)
 	}
+
 	ext, err := fileInfo.GetString("FileTypeExtension")
 	if err != nil {
 		return Photo{}, fmt.Errorf("error on 'FileTypeExtension': %w", err)
 	}
+
 	createdAt, err := time.Parse("2006:01:02 15:04:05.000-07:00", dateTime)
 	if err != nil {
 		return Photo{}, fmt.Errorf("failed to parse createdAt: %w", err)
