@@ -34,42 +34,6 @@ func main() {
 	}
 }
 
-func getPhotos(ctx context.Context, files []string) ([]Photo, error) {
-	ch := make(chan Photo)
-	eg, ctx := errgroup.WithContext(ctx)
-
-	for _, file := range files {
-		file := file
-		eg.Go(func() error {
-			photo, err := analyzeExifdata(file)
-			if err != nil {
-				return fmt.Errorf("%s: failed to get EXIF data: %w", file, err)
-			}
-			fmt.Printf("[INFO] Checking %s (time: %s)\n", photo.Name, photo.CreatedAt)
-			select {
-			case ch <- photo:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-			return nil
-		})
-	}
-
-	// https://devlights.hatenablog.com/entry/2020/03/10/112904
-	go func() {
-		_ = eg.Wait()
-		close(ch)
-	}()
-
-	var photos []Photo
-	for photo := range ch {
-		photos = append(photos, photo)
-	}
-
-	// secondaly wait
-	return photos, eg.Wait()
-}
-
 func runMain() error {
 	ctx := context.Background()
 
@@ -117,6 +81,43 @@ func runMain() error {
 	}
 
 	return err
+}
+
+func getPhotos(ctx context.Context, files []string) ([]Photo, error) {
+	ch := make(chan Photo)
+	eg, ctx := errgroup.WithContext(ctx)
+
+	for _, file := range files {
+		file := file
+		eg.Go(func() error {
+			photo, err := analyzeExifdata(file)
+			if err != nil {
+				return fmt.Errorf("%s: failed to get EXIF data: %w", file, err)
+			}
+			fmt.Printf("[INFO] Checking %s (time: %s)\n", photo.Name, photo.CreatedAt)
+			select {
+			case ch <- photo:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			return nil
+		})
+	}
+
+	go func() {
+		// do not handle error at this time
+		// because it would be done at the end of this func
+		_ = eg.Wait()
+		close(ch)
+	}()
+
+	var photos []Photo
+	for photo := range ch {
+		photos = append(photos, photo)
+	}
+
+	// handle error in goroutines (secondary wait)
+	return photos, eg.Wait()
 }
 
 func analyzeExifdata(file string) (Photo, error) {
