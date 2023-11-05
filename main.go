@@ -20,7 +20,7 @@ import (
 
 type Option struct {
 	ParentDir string `short:"d" long:"parent-dir" description:"Parent directory path to move renamed photos" required:"false" default:"."`
-	Dryrun    bool   `short:"n" long:"dryrun" description:"Displays the operations that would be performed using the specified command without actually running them" required:"false"`
+	Dryrun    bool   `short:"n" long:"dry-run" description:"Displays the operations that would be performed using the specified command without actually running them" required:"false"`
 }
 
 type Photo struct {
