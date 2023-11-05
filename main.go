@@ -12,6 +12,8 @@ import (
 	"github.com/barasher/go-exiftool"
 	"github.com/hashicorp/go-multierror"
 	"github.com/jessevdk/go-flags"
+	"github.com/k0kubun/go-ansi"
+	"github.com/schollz/progressbar/v3"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -69,18 +71,15 @@ func runMain() error {
 		}
 		fmt.Printf("[INFO] Renaming %q to %q\n", photo.Path, newPath)
 		if err := os.Rename(photo.Path, newPath); err != nil {
+			// Use hashicorp/go-multierror instead of errors.Join (as of Go 1.20)
+			// because this one is pretty good in output format.
 			errs = multierror.Append(
 				errs,
 				fmt.Errorf("%s: failed to rename: %w", photo.Path, err))
 		}
 	}
 
-	err, ok := errs.(*multierror.Error)
-	if !ok {
-		return errors.New("multierror assertion error")
-	}
-
-	return err
+	return errs
 }
 
 func getPhotos(ctx context.Context, files []string) ([]Photo, error) {
@@ -94,7 +93,6 @@ func getPhotos(ctx context.Context, files []string) ([]Photo, error) {
 			if err != nil {
 				return fmt.Errorf("%s: failed to get EXIF data: %w", file, err)
 			}
-			fmt.Printf("[INFO] Checking %s (time: %s)\n", photo.Name, photo.CreatedAt)
 			select {
 			case ch <- photo:
 			case <-ctx.Done():
@@ -111,8 +109,22 @@ func getPhotos(ctx context.Context, files []string) ([]Photo, error) {
 		close(ch)
 	}()
 
+	bar := progressbar.NewOptions(len(files),
+		progressbar.OptionSetWriter(ansi.NewAnsiStdout()),
+		progressbar.OptionEnableColorCodes(true),
+		progressbar.OptionSetWidth(20),
+		progressbar.OptionSetDescription("[INFO] Checking exif on photos..."),
+		progressbar.OptionSetTheme(progressbar.Theme{
+			Saucer:        "[green]=[reset]",
+			SaucerHead:    "[green]>[reset]",
+			SaucerPadding: " ",
+			BarStart:      "[",
+			BarEnd:        "]",
+		}))
+
 	var photos []Photo
 	for photo := range ch {
+		bar.Add(1)
 		photos = append(photos, photo)
 	}
 
