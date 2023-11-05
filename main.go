@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -45,7 +46,17 @@ func runMain() error {
 		return err
 	}
 
-	photos, err := getPhotos(ctx, args)
+	var paths []string
+	for _, arg := range args {
+		// walkDir can traverse dirs or files
+		files, err := walkDir(arg)
+		if err != nil {
+			return err
+		}
+		paths = append(paths, files...)
+	}
+
+	photos, err := getPhotos(ctx, paths)
 	if err != nil {
 		return err
 	}
@@ -80,6 +91,25 @@ func runMain() error {
 	}
 
 	return errs
+}
+
+func walkDir(root string) ([]string, error) {
+	files := []string{}
+
+	err := filepath.WalkDir(root, func(path string, info fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		files = append(files, path)
+		return nil
+	})
+
+	return files, err
 }
 
 func getPhotos(ctx context.Context, files []string) ([]Photo, error) {
