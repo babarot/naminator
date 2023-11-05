@@ -10,13 +10,14 @@ import (
 	"time"
 
 	"github.com/barasher/go-exiftool"
+	"github.com/hashicorp/go-multierror"
 	"github.com/jessevdk/go-flags"
 	"golang.org/x/sync/errgroup"
 )
 
 type Option struct {
 	ParentDir string `short:"d" long:"parent-dir" description:"Parent directory path to move renamed photos" required:"false" default:"."`
-	Dryrun    bool   `short:"n" long:"dryrun" description:"Displays the operations that would be performed using the specified command without actually running them" required:"false" default:"."`
+	Dryrun    bool   `short:"n" long:"dryrun" description:"Displays the operations that would be performed using the specified command without actually running them" required:"false"`
 }
 
 type Photo struct {
@@ -24,6 +25,13 @@ type Photo struct {
 	Path      string
 	Extension string
 	CreatedAt time.Time
+}
+
+func main() {
+	if err := runMain(); err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] failed to rename files: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func getPhotos(ctx context.Context, files []string) ([]Photo, error) {
@@ -62,18 +70,18 @@ func getPhotos(ctx context.Context, files []string) ([]Photo, error) {
 	return photos, eg.Wait()
 }
 
-func main() {
+func runMain() error {
 	ctx := context.Background()
 
 	var opt Option
 	args, err := flags.Parse(&opt)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	photos, err := getPhotos(ctx, args)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	sort.Slice(photos, func(i, j int) bool {
@@ -81,13 +89,14 @@ func main() {
 	})
 
 	if err := os.MkdirAll(opt.ParentDir, 0755); err != nil {
-		panic(err)
+		return err
 	}
 
-	for i, photo := range photos {
+	var errs error
+	for index, photo := range photos {
 		newPath := filepath.Join(opt.ParentDir, fmt.Sprintf("%s-%03d.%s",
 			photo.CreatedAt.Format("2006-01-02"),
-			i+1,
+			index+1,
 			photo.Extension,
 		))
 		if opt.Dryrun {
@@ -96,9 +105,18 @@ func main() {
 		}
 		fmt.Printf("[INFO] Renaming %q to %q\n", photo.Path, newPath)
 		if err := os.Rename(photo.Path, newPath); err != nil {
-			panic(err)
+			errs = multierror.Append(
+				errs,
+				fmt.Errorf("%s: failed to rename: %w", photo.Path, err))
 		}
 	}
+
+	err, ok := errs.(*multierror.Error)
+	if !ok {
+		return errors.New("multierror assertion error")
+	}
+
+	return err
 }
 
 func analyzeExifdata(file string) (Photo, error) {
