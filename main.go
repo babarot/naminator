@@ -144,6 +144,9 @@ func getPhotos(ctx context.Context, files []string) ([]Photo, error) {
 		progressbar.OptionEnableColorCodes(true),
 		progressbar.OptionSetWidth(20),
 		progressbar.OptionSetDescription("[INFO] Checking exif on photos..."),
+		progressbar.OptionOnCompletion(func() {
+			fmt.Fprint(os.Stdout, "\n")
+		}),
 		progressbar.OptionSetTheme(progressbar.Theme{
 			Saucer:        "[green]=[reset]",
 			SaucerHead:    "[green]>[reset]",
