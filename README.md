@@ -22,6 +22,8 @@ go install github.com/babarot/naminator@latest
 
 ## Usage
 
+### Basic
+
 ```console
 $ naminator --parent-dir Oct --dry-run 20231011 20231012
 [INFO] Checking exif on photos... 100% [====================]
@@ -33,6 +35,45 @@ $ naminator --parent-dir Oct --dry-run 20231011 20231012
 [INFO] (dryrun): Renaming "20231012/DSC00827.ARW" to "Oct/2023-10-11-001.arw"
 [INFO] (dryrun): Renaming "20231012/DSC00828.ARW" to "Oct/2023-10-11-002.arw"
 [INFO] (dryrun): Renaming "20231012/DSC00829.ARW" to "Oct/2023-10-11-003.arw"
+```
+
+### Usecase 1. Some dirs to one dir
+
+```console
+$ naminator --parent-dir ./Oct ./20231011 ./20231012
+```
+
+### Usecase 2. One dir to one dir
+
+```console
+$ naminator --parent-dir ./Oct ./20231013
+```
+
+### Usecase 3. Replace in dir (_Most simple_)
+
+```console
+$ naminator ./Oct
+```
+
+### Usecase 4. Sugar syntax
+
+1.
+
+```console
+$ naminator --parent-dir ./Oct ./Oct
+```
+```console
+$ naminator ./Oct
+```
+
+2.
+
+```console
+$ naminator --parent-dir ./Oct ./20231013
+```
+```console
+$ naminator --parent-dir ./20231013 ./20231013
+$ mv ./20231013/* ./Oct
 ```
 
 ## License

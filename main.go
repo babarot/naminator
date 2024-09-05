@@ -20,7 +20,7 @@ import (
 )
 
 type Option struct {
-	ParentDir string `short:"d" long:"parent-dir" description:"Parent directory path to move renamed photos" required:"false" default:"."`
+	ParentDir string `short:"d" long:"parent-dir" description:"Parent directory path to move renamed photos" required:"false" default:""`
 	Dryrun    bool   `short:"n" long:"dry-run" description:"Displays the operations that would be performed using the specified command without actually running them" required:"false"`
 	WithIndex bool   `long:"with-index" description:"Include index in a file name" required:"false"`
 }
@@ -48,6 +48,10 @@ func runMain() error {
 		return err
 	}
 
+	if len(args) == 0 {
+		return fmt.Errorf("too few arguments. required one at least")
+	}
+
 	var paths []string
 	for _, arg := range args {
 		// walkDir can traverse dirs or files
@@ -67,8 +71,14 @@ func runMain() error {
 		return photos[i].CreatedAt.Before(photos[j].CreatedAt)
 	})
 
-	if err := os.MkdirAll(opt.ParentDir, 0755); err != nil {
-		return err
+	if opt.ParentDir == "" {
+		opt.ParentDir = args[0]
+	}
+
+	if _, err := os.Stat(opt.ParentDir); !os.IsNotExist(err) {
+		if err := os.MkdirAll(opt.ParentDir, 0755); err != nil {
+			return err
+		}
 	}
 
 	var errs error
