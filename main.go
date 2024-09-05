@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,6 +22,7 @@ import (
 type Option struct {
 	ParentDir string `short:"d" long:"parent-dir" description:"Parent directory path to move renamed photos" required:"false" default:"."`
 	Dryrun    bool   `short:"n" long:"dry-run" description:"Displays the operations that would be performed using the specified command without actually running them" required:"false"`
+	WithIndex bool   `long:"with-index" description:"Include index in a file name" required:"false"`
 }
 
 type Photo struct {
@@ -70,12 +72,20 @@ func runMain() error {
 	}
 
 	var errs error
+	var newPath string
 	for index, photo := range photos {
-		newPath := filepath.Join(opt.ParentDir, fmt.Sprintf("%s-%03d.%s",
-			photo.CreatedAt.Format("2006-01-02"),
-			index+1,
-			photo.Extension,
-		))
+		if opt.WithIndex {
+			newPath = filepath.Join(opt.ParentDir, fmt.Sprintf("%s-%03d.%s",
+				photo.CreatedAt.Format("2006-01-02_15-04-05"),
+				index+1,
+				photo.Extension,
+			))
+		} else {
+			newPath = filepath.Join(opt.ParentDir, fmt.Sprintf("%s.%s",
+				photo.CreatedAt.Format("2006-01-02_15-04-05"),
+				photo.Extension,
+			))
+		}
 		if opt.Dryrun {
 			fmt.Printf("[INFO] (dryrun): Renaming %q to %q\n", photo.Path, newPath)
 			continue
@@ -121,7 +131,8 @@ func getPhotos(ctx context.Context, files []string) ([]Photo, error) {
 		eg.Go(func() error {
 			photo, err := analyzeExifdata(file)
 			if err != nil {
-				return fmt.Errorf("%s: failed to get EXIF data: %w", file, err)
+				log.Print(fmt.Errorf("%s: failed to get EXIF data: %w", file, err))
+				return nil
 			}
 			select {
 			case ch <- photo:
