@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/barasher/go-exiftool"
@@ -20,15 +22,22 @@ import (
 )
 
 type Option struct {
-	DestDir   string `short:"d" long:"dest-dir" description:"Directory path to move renamed photos" required:"false" default:""`
-	Dryrun    bool   `short:"n" long:"dry-run" description:"Displays the operations that would be performed using the specified command without actually running them" required:"false"`
-	WithIndex bool   `long:"with-index" description:"Include index in a file name" required:"false"`
-	Help      bool   `short:"h" long:"help" description:"Show help message"`
+	DestDir string `short:"d" long:"dest-dir" description:"Directory path to move renamed photos" required:"false" default:""`
+	Dryrun  bool   `short:"n" long:"dry-run" description:"Displays the operations that would be performed using the specified command without actually running them" required:"false"`
+
+	GroupByDate bool `short:"t" long:"group-by-date" description:"Group by photo datetime" required:"false"`
+	GroupByExt  bool `short:"e" long:"group-by-ext" description:"Group by photo extensions" required:"false"`
+
+	Clean     bool `short:"c" long:"clean" description:"Clean up the directory after renaming" required:"false"`
+	WithIndex bool `long:"with-index" description:"Include index in a file name" required:"false"`
+
+	Help bool `short:"h" long:"help" description:"Show help message"`
 }
 
 type Photo struct {
 	Name      string
 	Path      string
+	Dir       string
 	Extension string
 	CreatedAt time.Time
 }
@@ -79,27 +88,29 @@ func runMain() error {
 		return photos[i].CreatedAt.Before(photos[j].CreatedAt)
 	})
 
-	if opt.DestDir == "" {
-		opt.DestDir = args[0]
-	}
-
-	if _, err := os.Stat(opt.DestDir); !os.IsNotExist(err) {
-		if err := os.MkdirAll(opt.DestDir, 0755); err != nil {
-			return err
-		}
-	}
-
 	var errs error
 	var newPath string
 	for index, photo := range photos {
+		dest := opt.DestDir
+		if opt.GroupByDate {
+			dt := photo.CreatedAt.Format("2006-01-02")
+			dest = filepath.Join(dest, dt)
+		}
+		if opt.GroupByExt {
+			ext := getExt(photo.Path)
+			dest = filepath.Join(dest, ext)
+		}
+		if dest == "" {
+			dest = photo.Dir
+		}
 		if opt.WithIndex {
-			newPath = filepath.Join(opt.DestDir, fmt.Sprintf("%s-%03d.%s",
+			newPath = filepath.Join(dest, fmt.Sprintf("%s-%03d.%s",
 				photo.CreatedAt.Format("2006-01-02_15-04-05"),
 				index+1,
 				photo.Extension,
 			))
 		} else {
-			newPath = filepath.Join(opt.DestDir, fmt.Sprintf("%s.%s",
+			newPath = filepath.Join(dest, fmt.Sprintf("%s.%s",
 				photo.CreatedAt.Format("2006-01-02_15-04-05"),
 				photo.Extension,
 			))
@@ -109,12 +120,31 @@ func runMain() error {
 			continue
 		}
 		fmt.Printf("[INFO] Renaming %q to %q\n", photo.Path, newPath)
+		_ = os.MkdirAll(dest, 0755)
 		if err := os.Rename(photo.Path, newPath); err != nil {
 			// Use hashicorp/go-multierror instead of errors.Join (as of Go 1.20)
 			// because this one is pretty good in output format.
 			errs = multierror.Append(
 				errs,
 				fmt.Errorf("%s: failed to rename: %w", photo.Path, err))
+		}
+	}
+	if opt.Clean {
+		for _, arg := range args {
+			empty, err := isEmptyDir(arg)
+			if err != nil {
+				continue
+			}
+			if !empty {
+				fmt.Printf("[WARN] Cannot remove %q because NOT empty\n", arg)
+				continue
+			}
+			err = os.RemoveAll(arg)
+			if err != nil {
+				fmt.Printf("[ERROR] Failed to remove %q because NOT empty\n", arg)
+				continue
+			}
+			fmt.Printf("[INFO] Removed %q because empty\n", arg)
 		}
 	}
 
@@ -241,7 +271,34 @@ func analyzeExifdata(file string) (Photo, error) {
 	return Photo{
 		Name:      filename,
 		Path:      sourceFile,
+		Dir:       filepath.Dir(sourceFile),
 		Extension: ext,
 		CreatedAt: createdAt,
 	}, nil
+}
+
+func getExt(file string) string {
+	ext := filepath.Ext(file)
+	switch ext {
+	case ".ARW":
+		return "raw"
+	case ".HIF":
+		return "heif"
+	default:
+		return strings.ToLower(ext[1:]) //remove dot
+	}
+}
+
+func isEmptyDir(name string) (bool, error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	_, err = f.Readdirnames(1) // Or f.Readdir(1)
+	if err == io.EOF {
+		return true, nil
+	}
+	return false, err // Either not empty or error, suits both cases
 }
