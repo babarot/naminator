@@ -25,7 +25,7 @@ go install github.com/babarot/naminator@latest
 ### Basic
 
 ```console
-$ naminator --parent-dir Oct --dry-run 20231011 20231012
+$ naminator --dest-dir Oct --dry-run 20231011 20231012
 [INFO] Checking exif on photos... 100% [====================]
 [INFO] (dryrun): Renaming "20231011/DSC00822.ARW" to "Oct/2023-10-10-001.arw"
 [INFO] (dryrun): Renaming "20231011/DSC00823.ARW" to "Oct/2023-10-10-002.arw"
@@ -40,13 +40,13 @@ $ naminator --parent-dir Oct --dry-run 20231011 20231012
 ### Usecase 1. Some dirs to one dir
 
 ```console
-$ naminator --parent-dir ./Oct ./20231011 ./20231012
+$ naminator --dest-dir ./Oct ./20231011 ./20231012
 ```
 
 ### Usecase 2. One dir to one dir
 
 ```console
-$ naminator --parent-dir ./Oct ./20231013
+$ naminator --dest-dir ./Oct ./20231013
 ```
 
 ### Usecase 3. Replace in dir (_Most simple_)
@@ -60,7 +60,7 @@ $ naminator ./Oct
 1.
 
 ```console
-$ naminator --parent-dir ./Oct ./Oct
+$ naminator --dest-dir ./Oct ./Oct
 ```
 ```console
 $ naminator ./Oct
@@ -69,10 +69,10 @@ $ naminator ./Oct
 2.
 
 ```console
-$ naminator --parent-dir ./Oct ./20231013
+$ naminator --dest-dir ./Oct ./20231013
 ```
 ```console
-$ naminator --parent-dir ./20231013 ./20231013
+$ naminator --dest-dir ./20231013 ./20231013
 $ mv ./20231013/* ./Oct
 ```
 

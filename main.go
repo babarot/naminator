@@ -20,9 +20,10 @@ import (
 )
 
 type Option struct {
-	ParentDir string `short:"d" long:"parent-dir" description:"Parent directory path to move renamed photos" required:"false" default:""`
+	DestDir   string `short:"d" long:"dest-dir" description:"Directory path to move renamed photos" required:"false" default:""`
 	Dryrun    bool   `short:"n" long:"dry-run" description:"Displays the operations that would be performed using the specified command without actually running them" required:"false"`
 	WithIndex bool   `long:"with-index" description:"Include index in a file name" required:"false"`
+	Help      bool   `short:"h" long:"help" description:"Show help message"`
 }
 
 type Photo struct {
@@ -43,9 +44,16 @@ func runMain() error {
 	ctx := context.Background()
 
 	var opt Option
-	args, err := flags.Parse(&opt)
+
+	parser := flags.NewParser(&opt, flags.Default & ^flags.HelpFlag)
+	args, err := parser.Parse()
 	if err != nil {
 		return err
+	}
+
+	if opt.Help {
+		parser.WriteHelp(os.Stdout)
+		return nil
 	}
 
 	if len(args) == 0 {
@@ -71,12 +79,12 @@ func runMain() error {
 		return photos[i].CreatedAt.Before(photos[j].CreatedAt)
 	})
 
-	if opt.ParentDir == "" {
-		opt.ParentDir = args[0]
+	if opt.DestDir == "" {
+		opt.DestDir = args[0]
 	}
 
-	if _, err := os.Stat(opt.ParentDir); !os.IsNotExist(err) {
-		if err := os.MkdirAll(opt.ParentDir, 0755); err != nil {
+	if _, err := os.Stat(opt.DestDir); !os.IsNotExist(err) {
+		if err := os.MkdirAll(opt.DestDir, 0755); err != nil {
 			return err
 		}
 	}
@@ -85,13 +93,13 @@ func runMain() error {
 	var newPath string
 	for index, photo := range photos {
 		if opt.WithIndex {
-			newPath = filepath.Join(opt.ParentDir, fmt.Sprintf("%s-%03d.%s",
+			newPath = filepath.Join(opt.DestDir, fmt.Sprintf("%s-%03d.%s",
 				photo.CreatedAt.Format("2006-01-02_15-04-05"),
 				index+1,
 				photo.Extension,
 			))
 		} else {
-			newPath = filepath.Join(opt.ParentDir, fmt.Sprintf("%s.%s",
+			newPath = filepath.Join(opt.DestDir, fmt.Sprintf("%s.%s",
 				photo.CreatedAt.Format("2006-01-02_15-04-05"),
 				photo.Extension,
 			))
