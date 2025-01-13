@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/barasher/go-exiftool"
+	"github.com/gabriel-vasile/mimetype"
 	"github.com/hashicorp/go-multierror"
 	"github.com/jessevdk/go-flags"
 	"github.com/k0kubun/go-ansi"
@@ -278,6 +279,10 @@ func analyzeExifdata(file string) (Photo, error) {
 }
 
 func getExt(file string) string {
+	mime, _ := mimetype.DetectFile(file)
+	if !strings.Contains(mime.String(), "image") {
+		log.Panicf("%s: mimetype is not image", mime.String())
+	}
 	ext := filepath.Ext(file)
 	switch ext {
 	case ".ARW":
@@ -285,7 +290,7 @@ func getExt(file string) string {
 	case ".HIF":
 		return "heif"
 	default:
-		return strings.ToLower(ext[1:]) //remove dot
+		return strings.ToLower(ext[1:]) // remove dot
 	}
 }
 
