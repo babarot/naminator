@@ -54,7 +54,6 @@ func runMain() error {
 	ctx := context.Background()
 
 	var opt Option
-
 	parser := flags.NewParser(&opt, flags.Default & ^flags.HelpFlag)
 	args, err := parser.Parse()
 	if err != nil {
@@ -70,29 +69,26 @@ func runMain() error {
 		return fmt.Errorf("too few arguments. required one at least")
 	}
 
-	var paths []string
+	var allPhotos []Photo
 	for _, arg := range args {
-		// walkDir can traverse dirs or files
-		files, err := walkDir(arg)
+		photos, err := getPhotos(ctx, arg)
 		if err != nil {
 			return err
 		}
-		paths = append(paths, files...)
+		allPhotos = append(allPhotos, photos...)
 	}
 
-	photos, err := getPhotos(ctx, paths)
-	if err != nil {
-		return err
-	}
-
-	sort.Slice(photos, func(i, j int) bool {
-		return photos[i].CreatedAt.Before(photos[j].CreatedAt)
+	sort.Slice(allPhotos, func(i, j int) bool {
+		return allPhotos[i].CreatedAt.Before(allPhotos[j].CreatedAt)
 	})
 
 	var errs error
 	var newPath string
-	for index, photo := range photos {
+	for index, photo := range allPhotos {
 		dest := opt.DestDir
+		if dest == "" {
+			dest = photo.Dir
+		}
 		if opt.GroupByDate {
 			dt := photo.CreatedAt.Format("2006-01-02")
 			dest = filepath.Join(dest, dt)
@@ -100,9 +96,6 @@ func runMain() error {
 		if opt.GroupByExt {
 			ext := getExt(photo.Path)
 			dest = filepath.Join(dest, ext)
-		}
-		if dest == "" {
-			dest = photo.Dir
 		}
 		if opt.WithIndex {
 			newPath = filepath.Join(dest, fmt.Sprintf("%s-%03d.%s",
@@ -171,14 +164,20 @@ func walkDir(root string) ([]string, error) {
 	return files, err
 }
 
-func getPhotos(ctx context.Context, files []string) ([]Photo, error) {
+func getPhotos(ctx context.Context, dir string) ([]Photo, error) {
 	ch := make(chan Photo)
 	eg, ctx := errgroup.WithContext(ctx)
+
+	// walkDir can traverse dirs or files
+	files, err := walkDir(dir)
+	if err != nil {
+		return []Photo{}, err
+	}
 
 	for _, file := range files {
 		file := file
 		eg.Go(func() error {
-			photo, err := analyzeExifdata(file)
+			photo, err := analyzeExifdata(dir, file)
 			if err != nil {
 				log.Print(fmt.Errorf("%s: failed to get EXIF data: %w", file, err))
 				return nil
@@ -225,7 +224,7 @@ func getPhotos(ctx context.Context, files []string) ([]Photo, error) {
 	return photos, eg.Wait()
 }
 
-func analyzeExifdata(file string) (Photo, error) {
+func analyzeExifdata(dir, file string) (Photo, error) {
 	et, err := exiftool.NewExiftool()
 	if err != nil {
 		return Photo{}, fmt.Errorf("failed to run exiftool: %w", err)
@@ -272,7 +271,7 @@ func analyzeExifdata(file string) (Photo, error) {
 	return Photo{
 		Name:      filename,
 		Path:      sourceFile,
-		Dir:       filepath.Dir(sourceFile),
+		Dir:       filepath.Dir(dir), // dir of given path (dir).
 		Extension: ext,
 		CreatedAt: createdAt,
 	}, nil
