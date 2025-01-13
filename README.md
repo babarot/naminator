@@ -22,58 +22,251 @@ go install github.com/babarot/naminator@latest
 
 ## Usage
 
-### Basic
 
 ```console
-$ naminator --dest-dir Oct --dry-run 20231011 20231012
+$ naminator -h
+Usage:
+  naminator
+
+Application Options:
+  -d, --dest-dir=      Directory path to move renamed photos
+  -n, --dry-run        Displays the operations that would be performed using the specified command without actually running them
+  -t, --group-by-date  Group by photo datetime
+  -e, --group-by-ext   Group by photo extensions
+  -c, --clean          Clean up the directory after renaming
+      --with-index     Include index in a file name
+  -h, --help           Show help message
+
+```
+
+Take directories having images as arguments, and rename images with EXIF data. Renaming will be processed in the same directories.
+
+```console
+$ naminator --dry-run ./11740919 /11840920
 [INFO] Checking exif on photos... 100% [====================]
-[INFO] (dryrun): Renaming "20231011/DSC00822.ARW" to "Oct/2023-10-10-001.arw"
-[INFO] (dryrun): Renaming "20231011/DSC00823.ARW" to "Oct/2023-10-10-002.arw"
-[INFO] (dryrun): Renaming "20231011/DSC00824.ARW" to "Oct/2023-10-10-003.arw"
-[INFO] (dryrun): Renaming "20231011/DSC00825.ARW" to "Oct/2023-10-10-004.arw"
-[INFO] (dryrun): Renaming "20231011/DSC00826.ARW" to "Oct/2023-10-10-005.arw"
-[INFO] (dryrun): Renaming "20231012/DSC00827.ARW" to "Oct/2023-10-11-001.arw"
-[INFO] (dryrun): Renaming "20231012/DSC00828.ARW" to "Oct/2023-10-11-002.arw"
-[INFO] (dryrun): Renaming "20231012/DSC00829.ARW" to "Oct/2023-10-11-003.arw"
+[INFO] (dryrun): Renaming "11740919/A7C08228.HIF" to "11740919/2024-09-19_09-17-20.heif"
+[INFO] (dryrun): Renaming "11740919/A7C08228.ARW" to "11740919/2024-09-19_09-17-20.arw"
+[INFO] (dryrun): Renaming "11740919/A7C08231.HIF" to "11740919/2024-09-19_09-17-38.heif"
+[INFO] (dryrun): Renaming "11740919/A7C08231.ARW" to "11740919/2024-09-19_09-17-38.arw"
+[INFO] (dryrun): Renaming "11740919/A7C08232.HIF" to "11740919/2024-09-19_09-17-45.heif"
+[INFO] (dryrun): Renaming "11740919/A7C08232.ARW" to "11740919/2024-09-19_09-17-45.arw"
+[INFO] (dryrun): Renaming "11740919/A7C08236.HIF" to "11740919/2024-09-19_18-11-56.heif"
+[INFO] (dryrun): Renaming "11740919/A7C08236.ARW" to "11740919/2024-09-19_18-11-56.arw"
+[INFO] (dryrun): Renaming "11840920/A7C08607.HIF" to "11840920/2024-09-20_13-24-36.heif"
+[INFO] (dryrun): Renaming "11840920/A7C08607.ARW" to "11840920/2024-09-20_13-24-36.arw"
+[INFO] (dryrun): Renaming "11840920/A7C08608.HIF" to "11840920/2024-09-20_13-24-48.heif"
+[INFO] (dryrun): Renaming "11840920/A7C08608.ARW" to "11840920/2024-09-20_13-24-48.arw"
+[INFO] (dryrun): Renaming "11840920/A7C08609.HIF" to "11840920/2024-09-20_13-24-50.heif"
+[INFO] (dryrun): Renaming "11840920/A7C08609.ARW" to "11840920/2024-09-20_13-24-50.arw"
 ```
 
-### Usecase 1. Some dirs to one dir
+## Examples
 
-```console
-$ naminator --dest-dir ./Oct ./20231011 ./20231012
+Let's say your photos are located like below:
+
+```
+├── 10050111
+│   ├── A7C00138.ARW
+│   ├── A7C00138.HIF
+│   ├── A7C00139.ARW
+│   ├── A7C00139.HIF
+│   ├── A7C00140.ARW
+│   ├── A7C00140.HIF
+│   ├── A7C00141.ARW
+│   └── A7C00141.HIF
+└── 10150112
+    ├── A7C00221.ARW
+    ├── A7C00221.HIF
+    ├── A7C00222.ARW
+    ├── A7C00222.HIF
+    └── A7C00223.ARW
 ```
 
-### Usecase 2. One dir to one dir
+### 1. Make destination directory: `-d`, `--dest-dir`
+
+<details><summary>Run command</summary>
 
 ```console
-$ naminator --dest-dir ./Oct ./20231013
+$ naminator --dest-dir=myPhotos ./10050111 ./10150112
+[INFO] Checking exif on photos... 100% [====================]
+[INFO] Renaming "10050111/A7C00138.HIF" to "myPhotos/2025-01-11_11-12-43.heif"
+[INFO] Renaming "10050111/A7C00138.ARW" to "myPhotos/2025-01-11_11-12-43.arw"
+[INFO] Renaming "10050111/A7C00139.HIF" to "myPhotos/2025-01-11_11-15-50.heif"
+[INFO] Renaming "10050111/A7C00139.ARW" to "myPhotos/2025-01-11_11-15-50.arw"
+[INFO] Renaming "10050111/A7C00140.ARW" to "myPhotos/2025-01-11_11-15-52.arw"
+[INFO] Renaming "10050111/A7C00140.HIF" to "myPhotos/2025-01-11_11-15-52.heif"
+[INFO] Renaming "10050111/A7C00141.ARW" to "myPhotos/2025-01-11_11-16-06.arw"
+[INFO] Renaming "10050111/A7C00141.HIF" to "myPhotos/2025-01-11_11-16-06.heif"
+[INFO] Renaming "10150112/A7C00221.HIF" to "myPhotos/2025-01-12_13-04-00.heif"
+[INFO] Renaming "10150112/A7C00221.ARW" to "myPhotos/2025-01-12_13-04-00.arw"
+[INFO] Renaming "10150112/A7C00222.ARW" to "myPhotos/2025-01-12_13-04-06.arw"
+[INFO] Renaming "10150112/A7C00222.HIF" to "myPhotos/2025-01-12_13-04-06.heif"
+[INFO] Renaming "10150112/A7C00223.ARW" to "myPhotos/2025-01-12_13-13-56.arw"
 ```
 
-### Usecase 3. Replace in dir (_Most simple_)
+</details>
 
-```console
-$ naminator ./Oct
+```
+├── 10050111
+├── 10150112
+└── myPhotos
+    ├── 2025-01-11_11-12-43.arw
+    ├── 2025-01-11_11-12-43.heif
+    ├── 2025-01-11_11-15-50.arw
+    ├── 2025-01-11_11-15-50.heif
+    ├── 2025-01-11_11-15-52.arw
+    ├── 2025-01-11_11-15-52.heif
+    ├── 2025-01-11_11-16-06.arw
+    ├── 2025-01-11_11-16-06.heif
+    ├── 2025-01-12_13-04-00.arw
+    ├── 2025-01-12_13-04-00.heif
+    ├── 2025-01-12_13-04-06.arw
+    ├── 2025-01-12_13-04-06.heif
+    └── 2025-01-12_13-13-56.arw
 ```
 
-### Usecase 4. Sugar syntax
+### 2. Make the datetime directory: `-t`, `--group-by-date`
 
-1.
+
+<details><summary>Run command</summary>
 
 ```console
-$ naminator --dest-dir ./Oct ./Oct
+$ naminator --dest-dir=myPhotos --group-by-date ./10050111 ./10150112
+[INFO] Checking exif on photos... 100% [====================]
+[INFO] Renaming "10050111/A7C00138.ARW" to "myPhotos/2025-01-11/2025-01-11_11-12-43.arw"
+[INFO] Renaming "10050111/A7C00138.HIF" to "myPhotos/2025-01-11/2025-01-11_11-12-43.heif"
+[INFO] Renaming "10050111/A7C00139.HIF" to "myPhotos/2025-01-11/2025-01-11_11-15-50.heif"
+[INFO] Renaming "10050111/A7C00139.ARW" to "myPhotos/2025-01-11/2025-01-11_11-15-50.arw"
+[INFO] Renaming "10050111/A7C00140.ARW" to "myPhotos/2025-01-11/2025-01-11_11-15-52.arw"
+[INFO] Renaming "10050111/A7C00140.HIF" to "myPhotos/2025-01-11/2025-01-11_11-15-52.heif"
+[INFO] Renaming "10050111/A7C00141.ARW" to "myPhotos/2025-01-11/2025-01-11_11-16-06.arw"
+[INFO] Renaming "10050111/A7C00141.HIF" to "myPhotos/2025-01-11/2025-01-11_11-16-06.heif"
+[INFO] Renaming "10150112/A7C00221.ARW" to "myPhotos/2025-01-12/2025-01-12_13-04-00.arw"
+[INFO] Renaming "10150112/A7C00221.HIF" to "myPhotos/2025-01-12/2025-01-12_13-04-00.heif"
+[INFO] Renaming "10150112/A7C00222.HIF" to "myPhotos/2025-01-12/2025-01-12_13-04-06.heif"
+[INFO] Renaming "10150112/A7C00222.ARW" to "myPhotos/2025-01-12/2025-01-12_13-04-06.arw"
+[INFO] Renaming "10150112/A7C00223.ARW" to "myPhotos/2025-01-12/2025-01-12_13-13-56.arw"
 ```
-```console
-$ naminator ./Oct
+
+</details>
+
+```
+├── 10050111
+├── 10150112
+└── myPhotos
+    ├── 2025-01-11
+    │   ├── 2025-01-11_11-12-43.arw
+    │   ├── 2025-01-11_11-12-43.heif
+    │   ├── 2025-01-11_11-15-50.arw
+    │   ├── 2025-01-11_11-15-50.heif
+    │   ├── 2025-01-11_11-15-52.arw
+    │   ├── 2025-01-11_11-15-52.heif
+    │   ├── 2025-01-11_11-16-06.arw
+    │   └── 2025-01-11_11-16-06.heif
+    └── 2025-01-12
+        ├── 2025-01-12_13-04-00.arw
+        ├── 2025-01-12_13-04-00.heif
+        ├── 2025-01-12_13-04-06.arw
+        ├── 2025-01-12_13-04-06.heif
+        └── 2025-01-12_13-13-56.arw
 ```
 
-2.
+### 3. Make the extension directory: `-e`, `--group-by-ext`
+
+<details><summary>Run command</summary>
 
 ```console
-$ naminator --dest-dir ./Oct ./20231013
+$ naminator --dest-dir=myPhotos --group-by-date --group-by-ext ./10050111 ./10150112
+[INFO] Checking exif on photos... 100% [====================]
+[INFO] Renaming "10050111/A7C00138.HIF" to "myPhotos/2025-01-11/heif/2025-01-11_11-12-43.heif"
+[INFO] Renaming "10050111/A7C00138.ARW" to "myPhotos/2025-01-11/raw/2025-01-11_11-12-43.arw"
+[INFO] Renaming "10050111/A7C00139.ARW" to "myPhotos/2025-01-11/raw/2025-01-11_11-15-50.arw"
+[INFO] Renaming "10050111/A7C00139.HIF" to "myPhotos/2025-01-11/heif/2025-01-11_11-15-50.heif"
+[INFO] Renaming "10050111/A7C00140.HIF" to "myPhotos/2025-01-11/heif/2025-01-11_11-15-52.heif"
+[INFO] Renaming "10050111/A7C00140.ARW" to "myPhotos/2025-01-11/raw/2025-01-11_11-15-52.arw"
+[INFO] Renaming "10050111/A7C00141.ARW" to "myPhotos/2025-01-11/raw/2025-01-11_11-16-06.arw"
+[INFO] Renaming "10050111/A7C00141.HIF" to "myPhotos/2025-01-11/heif/2025-01-11_11-16-06.heif"
+[INFO] Renaming "10150112/A7C00221.HIF" to "myPhotos/2025-01-12/heif/2025-01-12_13-04-00.heif"
+[INFO] Renaming "10150112/A7C00221.ARW" to "myPhotos/2025-01-12/raw/2025-01-12_13-04-00.arw"
+[INFO] Renaming "10150112/A7C00222.HIF" to "myPhotos/2025-01-12/heif/2025-01-12_13-04-06.heif"
+[INFO] Renaming "10150112/A7C00222.ARW" to "myPhotos/2025-01-12/raw/2025-01-12_13-04-06.arw"
+[INFO] Renaming "10150112/A7C00223.ARW" to "myPhotos/2025-01-12/raw/2025-01-12_13-13-56.arw"
 ```
+
+</details>
+
+```
+├── 10050111
+├── 10150112
+└── myPhotos
+    ├── 2025-01-11
+    │   ├── heif
+    │   │   ├── 2025-01-11_11-12-43.heif
+    │   │   ├── 2025-01-11_11-15-50.heif
+    │   │   ├── 2025-01-11_11-15-52.heif
+    │   │   └── 2025-01-11_11-16-06.heif
+    │   └── raw
+    │       ├── 2025-01-11_11-12-43.arw
+    │       ├── 2025-01-11_11-15-50.arw
+    │       ├── 2025-01-11_11-15-52.arw
+    │       └── 2025-01-11_11-16-06.arw
+    └── 2025-01-12
+        ├── heif
+        │   ├── 2025-01-12_13-04-00.heif
+        │   └── 2025-01-12_13-04-06.heif
+        └── raw
+            ├── 2025-01-12_13-04-00.arw
+            ├── 2025-01-12_13-04-06.arw
+            └── 2025-01-12_13-13-56.arw
+```
+
+### 4. Clean up empty directories: `-c`, `--clean`
+
+<details><summary>Run command</summary>
+
 ```console
-$ naminator --dest-dir ./20231013 ./20231013
-$ mv ./20231013/* ./Oct
+$ naminator --dest-dir=myPhotos --group-by-date --group-by-ext --clean ./10050111 ./10150112
+[INFO] Checking exif on photos... 100% [====================]
+[INFO] Renaming "10050111/A7C00138.ARW" to "myPhotos/2025-01-11/raw/2025-01-11_11-12-43.arw"
+[INFO] Renaming "10050111/A7C00138.HIF" to "myPhotos/2025-01-11/heif/2025-01-11_11-12-43.heif"
+[INFO] Renaming "10050111/A7C00139.HIF" to "myPhotos/2025-01-11/heif/2025-01-11_11-15-50.heif"
+[INFO] Renaming "10050111/A7C00139.ARW" to "myPhotos/2025-01-11/raw/2025-01-11_11-15-50.arw"
+[INFO] Renaming "10050111/A7C00140.ARW" to "myPhotos/2025-01-11/raw/2025-01-11_11-15-52.arw"
+[INFO] Renaming "10050111/A7C00140.HIF" to "myPhotos/2025-01-11/heif/2025-01-11_11-15-52.heif"
+[INFO] Renaming "10050111/A7C00141.ARW" to "myPhotos/2025-01-11/raw/2025-01-11_11-16-06.arw"
+[INFO] Renaming "10050111/A7C00141.HIF" to "myPhotos/2025-01-11/heif/2025-01-11_11-16-06.heif"
+[INFO] Renaming "10150112/A7C00221.ARW" to "myPhotos/2025-01-12/raw/2025-01-12_13-04-00.arw"
+[INFO] Renaming "10150112/A7C00221.HIF" to "myPhotos/2025-01-12/heif/2025-01-12_13-04-00.heif"
+[INFO] Renaming "10150112/A7C00222.HIF" to "myPhotos/2025-01-12/heif/2025-01-12_13-04-06.heif"
+[INFO] Renaming "10150112/A7C00222.ARW" to "myPhotos/2025-01-12/raw/2025-01-12_13-04-06.arw"
+[INFO] Renaming "10150112/A7C00223.ARW" to "myPhotos/2025-01-12/raw/2025-01-12_13-13-56.arw"
+[INFO] Removed "./10050111" because empty
+[INFO] Removed "./10150112" because empty
+```
+
+</details>
+
+```
+└── myPhotos
+    ├── 2025-01-11
+    │   ├── heif
+    │   │   ├── 2025-01-11_11-12-43.heif
+    │   │   ├── 2025-01-11_11-15-50.heif
+    │   │   ├── 2025-01-11_11-15-52.heif
+    │   │   └── 2025-01-11_11-16-06.heif
+    │   └── raw
+    │       ├── 2025-01-11_11-12-43.arw
+    │       ├── 2025-01-11_11-15-50.arw
+    │       ├── 2025-01-11_11-15-52.arw
+    │       └── 2025-01-11_11-16-06.arw
+    └── 2025-01-12
+        ├── heif
+        │   ├── 2025-01-12_13-04-00.heif
+        │   └── 2025-01-12_13-04-06.heif
+        └── raw
+            ├── 2025-01-12_13-04-00.arw
+            ├── 2025-01-12_13-04-06.arw
+            └── 2025-01-12_13-13-56.arw
 ```
 
 ## License
