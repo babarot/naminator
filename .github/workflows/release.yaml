@@ -2,29 +2,63 @@ name: Release
 
 on:
   push:
-    tags:
-      - "*"
+    branches:
+      - main
 
-permissions:
-  contents: write
+concurrency:
+  group: ${{ github.workflow }}
 
 jobs:
-  goreleaser:
+  tagpr:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/create-github-app-token@v1
+        id: app-token
         with:
-          fetch-depth: 0
-      - name: Set up Go
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.PRIVATE_KEY }}
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+      - id: run-tagpr
+        uses: Songmu/tagpr@3dca11e7c0d68637ee212ddd35acc3d30a7403a4 # v1.5.0
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+    outputs:
+      tagpr-tag: ${{ steps.run-tagpr.outputs.tag }}
+
+  release:
+    if: needs.tagpr.outputs.tagpr-tag != ''
+    needs: tagpr
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+      - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
-          cache: true
-      - name: Run GoReleaser
+          go-version-file: 'go.mod'
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.PRIVATE_KEY }}
+          owner: babarot
+          repositories: |
+            naminator
+            homebrew-tap
+      - name: Setup GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           version: '~> v2'
           args: release --clean
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
