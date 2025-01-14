@@ -67,7 +67,7 @@ func runMain() error {
 	}
 
 	if opt.Version {
-		fmt.Printf("naminator %s (%s)\n", version, commit)
+		fmt.Printf("naminator %s (%s)\n", Version, Revision)
 		return nil
 	}
 

@@ -1,8 +1,7 @@
 package main
 
-const version = "0.1.3"
+const Version = "0.1.3"
 
 var (
-	revision = "HEAD"
-	commit   = "HEAD"
+	Revision = "HEAD"
 )

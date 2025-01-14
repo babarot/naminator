@@ -13,8 +13,8 @@ builds:
       - darwin
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
-      - -X main.commit={{.ShortCommit}}
+      - -X main.Version={{.Version}}
+      - -X main.Revision={{.ShortCommit}}
     main: main.go
 
 archives:
