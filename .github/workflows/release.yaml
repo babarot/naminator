@@ -16,51 +16,36 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      # - uses: actions/create-github-app-token@v1
-      #   id: app-token
-      #   with:
-      #     app-id: ${{ secrets.APP_ID }}
-      #     private-key: ${{ secrets.PRIVATE_KEY }}
-      - uses: actions/checkout@v4
-        # with:
-        #   token: ${{ steps.app-token.outputs.token }}
-      - id: run-tagpr
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run tagpr
         uses: Songmu/tagpr@3dca11e7c0d68637ee212ddd35acc3d30a7403a4 # v1.5.0
         env:
-          # GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        id: run-tagpr
     outputs:
-      tagpr-tag: ${{ steps.run-tagpr.outputs.tag }}
+      tag: ${{ steps.run-tagpr.outputs.tag }}
 
-  release:
-    if: needs.tagpr.outputs.tagpr-tag != ''
+  goreleaser:
+    if: needs.tagpr.outputs.tag != ''
     needs: tagpr
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-tags: true
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-      # - uses: actions/create-github-app-token@v1
-      #   id: app-token
-      #   with:
-      #     app-id: ${{ secrets.APP_ID }}
-      #     private-key: ${{ secrets.PRIVATE_KEY }}
-      #     owner: babarot
-      #     repositories: |
-      #       naminator
-      #       homebrew-tap
-      - name: Setup GoReleaser
+      - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           version: '~> v2'
           args: release --clean
         env:
-          # GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

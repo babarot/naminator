@@ -32,7 +32,8 @@ type Option struct {
 	Clean     bool `short:"c" long:"clean" description:"Clean up the directory after renaming" required:"false"`
 	WithIndex bool `long:"with-index" description:"Include index in a file name" required:"false"`
 
-	Help bool `short:"h" long:"help" description:"Show help message"`
+	Help    bool `short:"h" long:"help" description:"Show help message"`
+	Version bool `short:"v" long:"version" description:"Show version"`
 }
 
 type Photo struct {
@@ -62,6 +63,10 @@ func runMain() error {
 
 	if opt.Help {
 		parser.WriteHelp(os.Stdout)
+		return nil
+	}
+	if opt.Version {
+		fmt.Printf("naminator %s (%s)", version, commit)
 		return nil
 	}
 
