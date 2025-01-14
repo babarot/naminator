@@ -15,7 +15,7 @@ builds:
       - -s -w
       - -X main.Version={{.Version}}
       - -X main.Revision={{.ShortCommit}}
-    main: main.go
+    main: .
 
 archives:
   - format: tar.gz
