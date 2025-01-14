@@ -65,8 +65,9 @@ func runMain() error {
 		parser.WriteHelp(os.Stdout)
 		return nil
 	}
+
 	if opt.Version {
-		fmt.Printf("naminator %s (%s)", version, commit)
+		fmt.Printf("naminator %s (%s)\n", version, commit)
 		return nil
 	}
 
@@ -183,6 +184,10 @@ func getPhotos(ctx context.Context, dir string) ([]Photo, error) {
 
 	for _, file := range files {
 		file := file
+		mime, _ := mimetype.DetectFile(file)
+		if !strings.Contains(mime.String(), "image") {
+			continue
+		}
 		eg.Go(func() error {
 			photo, err := analyzeExifdata(dir, file)
 			if err != nil {
