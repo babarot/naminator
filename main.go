@@ -45,7 +45,7 @@ type Photo struct {
 
 func main() {
 	if err := runMain(); err != nil {
-		fmt.Fprintf(os.Stderr, "[ERROR] failed to rename files: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[ERROR] Failed to rename files: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -130,12 +130,14 @@ func runMain() error {
 				continue
 			}
 			if !empty {
-				fmt.Printf("[WARN] Cannot remove %q because NOT empty\n", arg)
+				fmt.Printf("[INFO] skip to clean dir %q because NOT empty\n", arg)
 				continue
 			}
 			err = os.RemoveAll(arg)
 			if err != nil {
-				fmt.Printf("[ERROR] Failed to remove %q because NOT empty\n", arg)
+				errs = multierror.Append(
+					errs,
+					fmt.Errorf("%s: failed to remove dir: %w", arg, err))
 				continue
 			}
 			fmt.Printf("[INFO] Removed %q because empty\n", arg)
