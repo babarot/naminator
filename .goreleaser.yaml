@@ -15,7 +15,7 @@ builds:
       - -s -w
       - -X main.version={{.Version}}
       - -X main.commit={{.ShortCommit}}
-    main: ./cmd/TODO
+    main: main.go
 
 archives:
   - format: tar.gz
@@ -36,10 +36,3 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
-
-release:
-  footer: >-
-
-    ---
-
-    Released by [GoReleaser](https://github.com/goreleaser/goreleaser).
