@@ -7,48 +7,15 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
-  tagpr:
-    runs-on: ubuntu-latest
-    outputs:
-      tagpr-tag: ${{ steps.run-tagpr.outputs.tag }}
-    steps:
-      - uses: actions/create-github-app-token@v1
-        id: app-token
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.PRIVATE_KEY }}
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          token: ${{ steps.app-token.outputs.token }}
-      - id: run-tagpr
-        name: Run tagpr
-        uses: Songmu/tagpr@v1
-        env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-
   goreleaser:
-    needs: tagpr
-    if: needs.tagpr.outputs.tagpr-tag != ''
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v1
-        id: app-token
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.PRIVATE_KEY }}
-          owner: babarot
-          repositories: |
-            naminator
-            homebrew-tap
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ steps.app-token.outputs.token }}
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -57,11 +24,8 @@ jobs:
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
-          # either 'goreleaser' (default) or 'goreleaser-pro'
           distribution: goreleaser
-          # 'latest', 'nightly', or a semver
           version: latest
           args: release --clean
         env:
-          # need to access other repository for brew-tap
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
