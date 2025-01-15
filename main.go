@@ -26,10 +26,10 @@ type Option struct {
 	DestDir string `short:"d" long:"dest-dir" description:"Directory path to move renamed photos" required:"false" default:""`
 	Dryrun  bool   `short:"n" long:"dry-run" description:"Displays the operations that would be performed using the specified command without actually running them" required:"false"`
 
-	GroupByDate bool `short:"t" long:"group-by-date" description:"Group by photo datetime" required:"false"`
-	GroupByExt  bool `short:"e" long:"group-by-ext" description:"Group by photo extensions" required:"false"`
+	GroupByDate bool `short:"t" long:"group-by-date" description:"Create a date directory and classify the photos for each date" required:"false"`
+	GroupByExt  bool `short:"e" long:"group-by-ext" description:"Create an extension directory and classify the photos for each ext" required:"false"`
 
-	Clean     bool `short:"c" long:"clean" description:"Clean up the directory after renaming" required:"false"`
+	Clean     bool `short:"c" long:"clean" description:"Clean up directories after renaming" required:"false"`
 	WithIndex bool `long:"with-index" description:"Include index in a file name" required:"false"`
 
 	Help    bool `short:"h" long:"help" description:"Show help message"`
@@ -129,6 +129,7 @@ func runMain() error {
 				fmt.Errorf("%s: failed to rename: %w", photo.Path, err))
 		}
 	}
+
 	if opt.Clean {
 		for _, arg := range args {
 			empty, err := isEmptyDir(arg)
