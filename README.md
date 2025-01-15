@@ -24,19 +24,19 @@ go install github.com/babarot/naminator@latest
 
 
 ```console
-$ naminator -h
+$ naminator --help
 Usage:
   naminator
 
 Application Options:
   -d, --dest-dir=      Directory path to move renamed photos
   -n, --dry-run        Displays the operations that would be performed using the specified command without actually running them
-  -t, --group-by-date  Group by photo datetime
-  -e, --group-by-ext   Group by photo extensions
-  -c, --clean          Clean up the directory after renaming
+  -t, --group-by-date  Create a date directory and classify the photos for each date
+  -e, --group-by-ext   Create an extension directory and classify the photos for each ext
+  -c, --clean          Clean up directories after renaming
       --with-index     Include index in a file name
   -h, --help           Show help message
-
+  -v, --version        Show version
 ```
 
 Take directories having images as arguments, and rename images with EXIF data. Renaming will be processed in the same directories.
