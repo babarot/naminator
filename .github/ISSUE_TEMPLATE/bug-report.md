@@ -45,4 +45,3 @@ body:
         </details>
     validations:
       required: true
-
