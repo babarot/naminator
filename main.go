@@ -32,7 +32,6 @@ type Option struct {
 	Clean     bool `short:"c" long:"clean" description:"Clean up directories after renaming" required:"false"`
 	WithIndex bool `long:"with-index" description:"Include index in a file name" required:"false"`
 
-	Help    bool `short:"h" long:"help" description:"Show help message"`
 	Version bool `short:"v" long:"version" description:"Show version"`
 }
 
@@ -46,7 +45,7 @@ type Photo struct {
 
 func main() {
 	if err := runMain(); err != nil {
-		fmt.Fprintf(os.Stderr, "[ERROR] Failed to rename files: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[ERROR] error occured while processing %s: %v\n", appName, err)
 		os.Exit(1)
 	}
 }
@@ -55,19 +54,20 @@ func runMain() error {
 	ctx := context.Background()
 
 	var opt Option
-	parser := flags.NewParser(&opt, flags.Default & ^flags.HelpFlag)
+	// parser := flags.NewParser(&opt, flags.Default & ^flags.HelpFlag) // if remove default help flag
+	parser := flags.NewParser(&opt, flags.Default)
+	parser.Name = appName
+	parser.Usage = "[OPTIONS] photos..."
 	args, err := parser.Parse()
 	if err != nil {
+		if flags.WroteHelp(err) {
+			return nil
+		}
 		return err
 	}
 
-	if opt.Help {
-		parser.WriteHelp(os.Stdout)
-		return nil
-	}
-
 	if opt.Version {
-		fmt.Printf("naminator %s (%s)\n", version, revision)
+		fmt.Printf("%s %s (%s)\n", appName, version, revision)
 		return nil
 	}
 

@@ -26,7 +26,7 @@ go install github.com/babarot/naminator@latest
 ```console
 $ naminator --help
 Usage:
-  naminator
+  naminator [OPTIONS] photos...
 
 Application Options:
   -d, --dest-dir=      Directory path to move renamed photos
@@ -35,8 +35,11 @@ Application Options:
   -e, --group-by-ext   Create an extension directory and classify the photos for each ext
   -c, --clean          Clean up directories after renaming
       --with-index     Include index in a file name
-  -h, --help           Show help message
   -v, --version        Show version
+
+Help Options:
+  -h, --help           Show this help message
+
 ```
 
 Take directories having images as arguments, and rename images with EXIF data. Renaming will be processed in the same directories.
