@@ -1,4 +1,4 @@
-# tagpr - this is used by tagpr management
+# tag management - used by tagpr management
 - name: tagpr
   description: Used by tagpr for managing the release
   color: ededed
@@ -8,8 +8,11 @@
 - name: tagpr:major
   description: Used by tagpr for managing the release
   color: ededed
+- name: no-update-changelog
+  description: Used in case of no need to update changelog
+  color: ededed
 
-# kind/ - The type of issue
+# kind/ - the type of issue
 - name: kind/bug
   description: A bug; unintended behavior
   color: 425df5
@@ -28,11 +31,3 @@
 - name: kind/import-requires
   description: Denotes a PR that needs to import when upgrading to the version including this PR changes
   color: 425df5
-
-# release/
-- name: release/major
-  description: Indicates major version to bump up next
-  color: 1dd1a1
-- name: release/minor
-  description: Indicates minor version to bump up next
-  color: 1dd1a1
