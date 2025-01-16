@@ -23,9 +23,9 @@ import (
 )
 
 const appName = "naminator"
-const version = "develop"
 
 var (
+	version  = "develop"
 	revision = "HEAD"
 )
 
