@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.1.8](https://github.com/babarot/naminator/compare/v0.1.7...v0.1.8) - 2025-01-16
+### Others
+- Change goreleaser config by @babarot in https://github.com/babarot/naminator/pull/16
+
 ## [v0.1.7](https://github.com/babarot/naminator/compare/v0.1.6...v0.1.7) - 2025-01-16
 ### Others
 - Add build workflow by @babarot in https://github.com/babarot/naminator/pull/15
