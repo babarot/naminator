@@ -64,7 +64,7 @@ func runMain() error {
 	// parser := flags.NewParser(&opt, flags.Default & ^flags.HelpFlag) // if remove default help flag
 	parser := flags.NewParser(&opt, flags.Default)
 	parser.Name = appName
-	parser.Usage = "[OPTIONS] photos..."
+	parser.Usage = "[OPTIONS] [files... | dirs...]"
 	args, err := parser.Parse()
 	if err != nil {
 		if flags.WroteHelp(err) {
@@ -79,7 +79,7 @@ func runMain() error {
 	}
 
 	if len(args) == 0 {
-		return fmt.Errorf("too few arguments. required one at least")
+		return fmt.Errorf("too few arguments")
 	}
 
 	var allPhotos []Photo
@@ -141,14 +141,14 @@ func runMain() error {
 		for _, arg := range args {
 			empty, err := isEmptyDir(arg)
 			if err != nil {
+				errs = multierror.Append(errs, err)
 				continue
 			}
 			if !empty {
 				fmt.Printf("[INFO] skip to clean dir %q because NOT empty\n", arg)
 				continue
 			}
-			err = os.RemoveAll(arg)
-			if err != nil {
+			if err := os.RemoveAll(arg); err != nil {
 				errs = multierror.Append(
 					errs,
 					fmt.Errorf("%s: failed to remove dir: %w", arg, err))
