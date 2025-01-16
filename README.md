@@ -1,5 +1,7 @@
 naminator
-===
+=========
+
+[![Go](https://github.com/babarot/naminator/actions/workflows/build.yaml/badge.svg)](https://github.com/babarot/naminator/actions/workflows/build.yaml)
 
 Renaming multiple photo files (JPG, PNG, TIFF, GIF, RAW, ...) based on their EXIF attributes, like date/time or location.
 
@@ -14,10 +16,36 @@ This tool is heavily inspired by [Photo Naminator](https://apps.apple.com/us/app
 
 - [exiftool](https://exiftool.org/)
 
+    ```console
+    brew install exiftool
+    ```
+
 ## Install
+
+Go:
 
 ```console
 go install github.com/babarot/naminator@latest
+```
+
+[afx](https://github.com/babarot/afx):
+
+```yaml
+github:
+- name: babarot/naminator
+  description: Bulk-rename w/ EXIF metadata
+  owner: babarot
+  repo: naminator
+  release:
+    name: naminator
+    tag: v0.1.5
+  command:
+    link:
+    - from: naminator
+```
+
+```console
+afx install
 ```
 
 ## Usage
