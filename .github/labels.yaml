@@ -28,6 +28,3 @@
 - name: kind/breaking-change
   description: Denotes a PR that introduces potentially breaking changes that require user action.
   color: 425df5
-- name: kind/import-requires
-  description: Denotes a PR that needs to import when upgrading to the version including this PR changes
-  color: 425df5
