@@ -144,6 +144,10 @@ func runMain() error {
 				errs = multierror.Append(errs, err)
 				continue
 			}
+			if opt.Dryrun {
+				fmt.Printf("[INFO] (dryrun) Would remove %q if empty\n", arg)
+				continue
+			}
 			if !empty {
 				fmt.Printf("[INFO] skip to clean dir %q because NOT empty\n", arg)
 				continue
