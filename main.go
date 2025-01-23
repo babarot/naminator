@@ -240,7 +240,7 @@ func getPhotos(ctx context.Context, dir string) ([]Photo, error) {
 
 	var photos []Photo
 	for photo := range ch {
-		bar.Add(1)
+		_ = bar.Add(1)
 		photos = append(photos, photo)
 	}
 

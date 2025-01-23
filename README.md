@@ -73,7 +73,7 @@ Help Options:
 Take directories having images as arguments, and rename images with EXIF data. Renaming will be processed in the same directories.
 
 ```console
-$ naminator --dry-run ./11740919 /11840920
+$ naminator --dry-run ./11740919 ./11840920
 [INFO] Checking exif on photos... 100% [====================]
 [INFO] (dryrun): Renaming "11740919/A7C08228.HIF" to "11740919/2024-09-19_09-17-20.heif"
 [INFO] (dryrun): Renaming "11740919/A7C08228.ARW" to "11740919/2024-09-19_09-17-20.arw"
