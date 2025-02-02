@@ -11,6 +11,7 @@ This tool is heavily inspired by [Photo Naminator](https://apps.apple.com/us/app
 `naminator` is a CLI command that read EXIF data of photos (like JPEG, PNG, GIF or RAW format files) as command-line arguments and renames their filenames based on metadata associated with those photos, like the date and time, or location or with what type of lense a photo was taken.
 -->
 
+![](./docs/demo.gif)
 
 ## Dependency
 
