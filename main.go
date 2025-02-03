@@ -83,7 +83,7 @@ func runMain() error {
 		return fmt.Errorf("too few arguments")
 	}
 
-	var allPhotos []Photo
+	// var allPhotos []Photo
 	images, err := getImages(args)
 	if err != nil {
 		return err
@@ -113,73 +113,87 @@ func runMain() error {
 	}
 
 	var photos []Photo
-	go func() {
-		// do not handle error at this time
-		// because it would be done at the end of this func
-		_ = eg.Wait()
-		close(ch)
-		for photo := range ch {
-			photos = append(photos, photo)
-		}
-		p.Send(finishMsg{})
-	}()
+	// go func() {
+	// 	// do not handle error at this time
+	// 	// because it would be done at the end of this func
+	// 	_ = eg.Wait()
+	// 	close(ch)
+	// 	for photo := range ch {
+	// 		photos = append(photos, photo)
+	// 	}
+	// }()
 
 	// handle error in goroutines (secondary wait)
 	// return photos, eg.Wait()
 	// 	allPhotos = append(allPhotos, photos...)
 	// }
 
+	// allPhotos = photos
+
+	var errs error
+	done := make(chan bool)
+	go func() {
+		_ = eg.Wait()
+		close(ch)
+		for photo := range ch {
+			photos = append(photos, photo)
+		}
+		sort.Slice(photos, func(i, j int) bool {
+			return photos[i].CreatedAt.Before(photos[j].CreatedAt)
+		})
+		var newPath string
+		start := time.Now()
+		// p.Send(resultMsg{photo: photo, duration: })
+		for index, photo := range photos {
+			dest := opt.DestDir
+			if dest == "" {
+				dest = photo.Dir
+			}
+			if opt.GroupByDate {
+				dt := photo.CreatedAt.Format("2006-01-02")
+				dest = filepath.Join(dest, dt)
+			}
+			if opt.GroupByExt {
+				ext := getExt(photo.Path)
+				dest = filepath.Join(dest, ext)
+			}
+			if opt.WithIndex {
+				newPath = filepath.Join(dest, fmt.Sprintf("%s-%03d.%s",
+					photo.CreatedAt.Format("2006-01-02_15-04-05"),
+					index+1,
+					photo.Extension,
+				))
+			} else {
+				newPath = filepath.Join(dest, fmt.Sprintf("%s.%s",
+					photo.CreatedAt.Format("2006-01-02_15-04-05"),
+					photo.Extension,
+				))
+			}
+			if opt.Dryrun {
+				p.Send(resultMsg{photo: photo, duration: duration(time.Since(start)), mv: true})
+				// fmt.Printf("[INFO] (dryrun): Renaming %q to %q\n", photo.Path, newPath)
+				continue
+			}
+			// fmt.Printf("[INFO] Renaming %q to %q\n", photo.Path, newPath)
+			p.Send(resultMsg{photo: photo, duration: duration(time.Since(start)), mv: true})
+			_ = os.MkdirAll(dest, 0755)
+			if err := os.Rename(photo.Path, newPath); err != nil {
+				// Use hashicorp/go-multierror instead of errors.Join (as of Go 1.20)
+				// because this one is pretty good in output format.
+				errs = multierror.Append(
+					errs,
+					fmt.Errorf("%s: failed to rename: %w", photo.Path, err))
+			}
+		}
+		p.Send(finishMsg{})
+		done <- true
+	}()
+
 	if _, err := p.Run(); err != nil {
 		fmt.Println("Error running program:", err)
 		os.Exit(1)
 	}
-	allPhotos = photos
-
-	sort.Slice(allPhotos, func(i, j int) bool {
-		return allPhotos[i].CreatedAt.Before(allPhotos[j].CreatedAt)
-	})
-
-	var errs error
-	var newPath string
-	for index, photo := range allPhotos {
-		dest := opt.DestDir
-		if dest == "" {
-			dest = photo.Dir
-		}
-		if opt.GroupByDate {
-			dt := photo.CreatedAt.Format("2006-01-02")
-			dest = filepath.Join(dest, dt)
-		}
-		if opt.GroupByExt {
-			ext := getExt(photo.Path)
-			dest = filepath.Join(dest, ext)
-		}
-		if opt.WithIndex {
-			newPath = filepath.Join(dest, fmt.Sprintf("%s-%03d.%s",
-				photo.CreatedAt.Format("2006-01-02_15-04-05"),
-				index+1,
-				photo.Extension,
-			))
-		} else {
-			newPath = filepath.Join(dest, fmt.Sprintf("%s.%s",
-				photo.CreatedAt.Format("2006-01-02_15-04-05"),
-				photo.Extension,
-			))
-		}
-		if opt.Dryrun {
-			// fmt.Printf("[INFO] (dryrun): Renaming %q to %q\n", photo.Path, newPath)
-			continue
-		}
-		// fmt.Printf("[INFO] Renaming %q to %q\n", photo.Path, newPath)
-		_ = os.MkdirAll(dest, 0755)
-		if err := os.Rename(photo.Path, newPath); err != nil {
-			// Use hashicorp/go-multierror instead of errors.Join (as of Go 1.20)
-			// because this one is pretty good in output format.
-			errs = multierror.Append(
-				errs,
-				fmt.Errorf("%s: failed to rename: %w", photo.Path, err))
-		}
-	}
+	<-done
 
 	if opt.Clean {
 		for _, arg := range args {
@@ -264,7 +278,6 @@ func getPhotos(ctx context.Context, dir string, p *tea.Program) ([]Photo, error)
 			continue
 		}
 		eg.Go(func() error {
-
 			start := time.Now()
 			photo, err := analyzeExifdata(dir, file)
 			if err != nil {
@@ -398,11 +411,16 @@ func (d duration) String() string {
 type resultMsg struct {
 	duration duration
 	photo    Photo
+	mv       bool
 }
 
 func (r resultMsg) String() string {
 	if r.duration == 0 {
 		return dotStyle.Render(strings.Repeat(".", 30))
+	}
+	if r.mv {
+		return fmt.Sprintf("🍔 moving %s %s", r.photo.Name,
+			durationStyle.Render(r.duration.String()))
 	}
 	return fmt.Sprintf("🍔 Checking %s %s", r.photo.Name,
 		durationStyle.Render(r.duration.String()))
