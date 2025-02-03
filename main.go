@@ -14,11 +14,12 @@ import (
 	"time"
 
 	"github.com/barasher/go-exiftool"
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/hashicorp/go-multierror"
 	"github.com/jessevdk/go-flags"
-	"github.com/k0kubun/go-ansi"
-	"github.com/schollz/progressbar/v3"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -83,13 +84,56 @@ func runMain() error {
 	}
 
 	var allPhotos []Photo
-	for _, arg := range args {
-		photos, err := getPhotos(ctx, arg)
-		if err != nil {
-			return err
-		}
-		allPhotos = append(allPhotos, photos...)
+	images, err := getImages(args)
+	if err != nil {
+		return err
 	}
+	p := tea.NewProgram(newModel())
+
+	ch := make(chan Photo, len(images))
+	eg, ctx := errgroup.WithContext(ctx)
+	for _, image := range images {
+		// walkDir can traverse dirs or files
+		image := image
+		eg.Go(func() error {
+			start := time.Now()
+			photo, err := analyzeExifdata(filepath.Dir(image), image)
+			if err != nil {
+				log.Print(fmt.Errorf("%s: failed to get EXIF data: %w", image, err))
+				return nil
+			}
+			select {
+			case ch <- photo:
+				p.Send(resultMsg{photo: photo, duration: duration(time.Since(start))})
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			return nil
+		})
+	}
+
+	var photos []Photo
+	go func() {
+		// do not handle error at this time
+		// because it would be done at the end of this func
+		_ = eg.Wait()
+		close(ch)
+		for photo := range ch {
+			photos = append(photos, photo)
+		}
+		p.Send(finishMsg{})
+	}()
+
+	// handle error in goroutines (secondary wait)
+	// return photos, eg.Wait()
+	// 	allPhotos = append(allPhotos, photos...)
+	// }
+
+	if _, err := p.Run(); err != nil {
+		fmt.Println("Error running program:", err)
+		os.Exit(1)
+	}
+	allPhotos = photos
 
 	sort.Slice(allPhotos, func(i, j int) bool {
 		return allPhotos[i].CreatedAt.Before(allPhotos[j].CreatedAt)
@@ -123,10 +167,10 @@ func runMain() error {
 			))
 		}
 		if opt.Dryrun {
-			fmt.Printf("[INFO] (dryrun): Renaming %q to %q\n", photo.Path, newPath)
+			// fmt.Printf("[INFO] (dryrun): Renaming %q to %q\n", photo.Path, newPath)
 			continue
 		}
-		fmt.Printf("[INFO] Renaming %q to %q\n", photo.Path, newPath)
+		// fmt.Printf("[INFO] Renaming %q to %q\n", photo.Path, newPath)
 		_ = os.MkdirAll(dest, 0755)
 		if err := os.Rename(photo.Path, newPath); err != nil {
 			// Use hashicorp/go-multierror instead of errors.Join (as of Go 1.20)
@@ -184,7 +228,26 @@ func walkDir(root string) ([]string, error) {
 	return files, err
 }
 
-func getPhotos(ctx context.Context, dir string) ([]Photo, error) {
+func getImages(dirs []string) ([]string, error) {
+	var images []string
+	for _, dir := range dirs {
+		files, err := walkDir(dir)
+		if err != nil {
+			return []string{}, err
+		}
+		for _, file := range files {
+			file := file
+			mime, _ := mimetype.DetectFile(file)
+			if !strings.Contains(mime.String(), "image") {
+				continue
+			}
+			images = append(images, file)
+		}
+	}
+	return images, nil
+}
+
+func getPhotos(ctx context.Context, dir string, p *tea.Program) ([]Photo, error) {
 	ch := make(chan Photo)
 	eg, ctx := errgroup.WithContext(ctx)
 
@@ -201,6 +264,8 @@ func getPhotos(ctx context.Context, dir string) ([]Photo, error) {
 			continue
 		}
 		eg.Go(func() error {
+
+			start := time.Now()
 			photo, err := analyzeExifdata(dir, file)
 			if err != nil {
 				log.Print(fmt.Errorf("%s: failed to get EXIF data: %w", file, err))
@@ -208,6 +273,7 @@ func getPhotos(ctx context.Context, dir string) ([]Photo, error) {
 			}
 			select {
 			case ch <- photo:
+				p.Send(resultMsg{photo: photo, duration: duration(time.Since(start))})
 			case <-ctx.Done():
 				return ctx.Err()
 			}
@@ -222,25 +288,8 @@ func getPhotos(ctx context.Context, dir string) ([]Photo, error) {
 		close(ch)
 	}()
 
-	bar := progressbar.NewOptions(len(files),
-		progressbar.OptionSetWriter(ansi.NewAnsiStdout()),
-		progressbar.OptionEnableColorCodes(true),
-		progressbar.OptionSetWidth(20),
-		progressbar.OptionSetDescription("[INFO] Checking exif on photos..."),
-		progressbar.OptionOnCompletion(func() {
-			fmt.Fprint(os.Stdout, "\n")
-		}),
-		progressbar.OptionSetTheme(progressbar.Theme{
-			Saucer:        "[green]=[reset]",
-			SaucerHead:    "[green]>[reset]",
-			SaucerPadding: " ",
-			BarStart:      "[",
-			BarEnd:        "]",
-		}))
-
 	var photos []Photo
 	for photo := range ch {
-		_ = bar.Add(1)
 		photos = append(photos, photo)
 	}
 
@@ -329,4 +378,91 @@ func isEmptyDir(name string) (bool, error) {
 		return true, nil
 	}
 	return false, err // Either not empty or error, suits both cases
+}
+
+var (
+	spinnerStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("63"))
+	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Margin(1, 0)
+	dotStyle      = helpStyle.UnsetMargins()
+	durationStyle = dotStyle
+	appStyle      = lipgloss.NewStyle().Margin(1, 2, 0, 2)
+)
+
+type duration time.Duration
+
+func (d duration) String() string {
+	sec := float64(d) / float64(time.Second)
+	return fmt.Sprintf("%.2fs", sec)
+}
+
+type resultMsg struct {
+	duration duration
+	photo    Photo
+}
+
+func (r resultMsg) String() string {
+	if r.duration == 0 {
+		return dotStyle.Render(strings.Repeat(".", 30))
+	}
+	return fmt.Sprintf("🍔 Checking %s %s", r.photo.Name,
+		durationStyle.Render(r.duration.String()))
+}
+
+type model struct {
+	spinner  spinner.Model
+	results  []resultMsg
+	quitting bool
+}
+
+func newModel() model {
+	const numLastResults = 10
+	s := spinner.New()
+	s.Style = spinnerStyle
+	return model{
+		spinner: s,
+		results: make([]resultMsg, numLastResults),
+	}
+}
+
+func (m model) Init() tea.Cmd {
+	return m.spinner.Tick
+}
+
+type finishMsg struct{}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case finishMsg:
+		m.quitting = true
+		return m, tea.Quit
+	case resultMsg:
+		m.results = append(m.results[1:], msg)
+		return m, nil
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+	default:
+		return m, nil
+	}
+}
+
+func (m model) View() string {
+	var s string
+
+	if m.quitting {
+		s += "That’s all for today!"
+	} else {
+		s += m.spinner.View() + " Eating food..."
+	}
+
+	s += "\n\n"
+
+	for _, res := range m.results {
+		s += res.String() + "\n"
+	}
+
+	s += "\n"
+
+	return appStyle.Render(s)
 }
