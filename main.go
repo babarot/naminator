@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/barasher/go-exiftool"
@@ -18,7 +18,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/jessevdk/go-flags"
-	"golang.org/x/sync/errgroup"
 )
 
 const appName = "naminator"
@@ -38,11 +37,12 @@ type Option struct {
 }
 
 type Photo struct {
-	Name      string
-	Path      string
-	Dir       string
-	Extension string
-	CreatedAt time.Time
+	Name        string
+	Path        string
+	RenamedPath string
+	Dir         string
+	Extension   string
+	CreatedAt   time.Time
 }
 
 func main() {
@@ -53,8 +53,6 @@ func main() {
 }
 
 func runMain() error {
-	ctx := context.Background()
-
 	var opt Option
 	parser := flags.NewParser(&opt, flags.Default)
 	parser.Name = appName
@@ -87,12 +85,13 @@ func runMain() error {
 
 	p := tea.NewProgram(newModel(len(images)))
 
-	rename := func(photo Photo) error {
+	rename := func(photo Photo) (Photo, bool, error) {
 		var newPath string
 		dest := opt.DestDir
 		if dest == "" {
 			dest = photo.Dir
 		}
+		baseDir := dest // keep dest at this point
 		if opt.GroupByDate {
 			dt := photo.CreatedAt.Format("2006-01-02")
 			dest = filepath.Join(dest, dt)
@@ -105,46 +104,41 @@ func runMain() error {
 			photo.CreatedAt.Format("2006-01-02_15-04-05"),
 			photo.Extension,
 		))
+		photo.RenamedPath = strings.TrimLeft(newPath, baseDir)
+		// photo.RenamedPath = newPath
 		if opt.Dryrun {
-			p.Send(renameResultMsg{photo: photo, newPath: newPath, dryrun: true})
-			return nil
+			return photo, true, nil
 		}
-		p.Send(renameResultMsg{photo: photo, newPath: newPath})
 		_ = os.MkdirAll(dest, 0755)
-		return os.Rename(photo.Path, newPath)
+		return photo, false, os.Rename(photo.Path, newPath)
 	}
 
-	ch := make(chan Photo, len(images))
-	eg, ctx := errgroup.WithContext(ctx)
+	var wg sync.WaitGroup
+
 	for _, image := range images {
-		image := image
-		eg.Go(func() error {
+		imagePath := image
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			start := time.Now()
-			photo, err := analyzeExifdata(filepath.Dir(image), image)
-			select {
-			case ch <- photo:
-				p.Send(analyzeResultMsg{
-					photo:    photo,
-					duration: duration(time.Since(start)),
-					err:      err,
-				})
-				_ = rename(photo)
-			case <-ctx.Done():
-				return ctx.Err()
+			photo, err := analyzeExifdata(imagePath)
+			p.Send(analyzeResultMsg{
+				photo:    photo,
+				duration: duration(time.Since(start)),
+				err:      err,
+			})
+			photo, dryrun, err := rename(photo)
+			if dryrun {
+				p.Send(renameResultMsg{photo: photo, dryrun: true})
+			} else {
+				p.Send(renameResultMsg{photo: photo, dryrun: false, err: err})
 			}
-			return nil
-		})
+		}()
 	}
-
-	var photos []Photo
 
 	// done := make(chan bool)
 	go func() {
-		_ = eg.Wait()
-		close(ch)
-		for photo := range ch {
-			photos = append(photos, photo)
-		}
+		wg.Wait()
 		if opt.Clean {
 			for _, arg := range args {
 				empty, err := isEmptyDir(arg)
@@ -181,20 +175,16 @@ func runMain() error {
 
 func walkDir(root string) ([]string, error) {
 	files := []string{}
-
 	err := filepath.WalkDir(root, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-
 		if info.IsDir() {
 			return nil
 		}
-
 		files = append(files, path)
 		return nil
 	})
-
 	return files, err
 }
 
@@ -217,23 +207,25 @@ func getImages(dirs []string) ([]string, error) {
 	return images, nil
 }
 
-func analyzeExifdata(dir, file string) (Photo, error) {
+func analyzeExifdata(path string) (Photo, error) {
 	et, err := exiftool.NewExiftool()
 	if err != nil {
 		return Photo{}, fmt.Errorf("failed to run exiftool: %w", err)
 	}
 	defer et.Close()
 
-	fileInfos := et.ExtractMetadata(file)
+	base := filepath.Base(path)
+	dir := filepath.Dir(path)
+	fileInfos := et.ExtractMetadata(path)
 	if len(fileInfos) == 0 {
-		return Photo{Name: file}, errors.New("failed to extract metadata")
+		return Photo{Name: base}, errors.New("failed to extract metadata")
 	}
 	// ExtractMetadata can deal with multiple files at once but this function only uses one argument
 	// so it's enough to reference the first element in fileInfos.
 	fileInfo := fileInfos[0]
 
 	if fileInfo.Err != nil {
-		return Photo{Name: file}, fmt.Errorf("file info error: %w", err)
+		return Photo{Name: base}, fmt.Errorf("file info error: %w", err)
 	}
 
 	filename, err := fileInfo.GetString("FileName")
@@ -320,10 +312,9 @@ type analyzeResultMsg struct {
 }
 
 type renameResultMsg struct {
-	photo   Photo
-	newPath string
-	dryrun  bool
-	err     error
+	photo  Photo
+	dryrun bool
+	err    error
 }
 
 type cleanResultMsg struct {
@@ -338,14 +329,14 @@ func (r cleanResultMsg) Err() error { return r.err }
 func (r cleanResultMsg) String() string {
 	if r.err != nil {
 		return fmt.Sprintf("%s %s: %v",
-			errorStyle.Render("Error!"),
+			errorStyle.Render("Failed to cleanup"),
 			r.dir,
 			r.err.Error())
 	}
 	if r.dryrun {
 		return fmt.Sprintf("%s Would remove %s if empty",
 			dryrunStyle.Render("(dryrun)"),
-			dryrunStyle.Render(r.dir),
+			r.dir,
 		)
 	}
 	if r.empty {
@@ -356,29 +347,30 @@ func (r cleanResultMsg) String() string {
 }
 
 func (r analyzeResultMsg) Err() error { return r.err }
-func (r renameResultMsg) Err() error  { return r.err }
+
+func (r renameResultMsg) Err() error { return r.err }
 
 func (r renameResultMsg) String() string {
 	if r.err != nil {
 		return fmt.Sprintf("%s %s: %v",
-			errorStyle.Render("Error!"),
+			errorStyle.Render("Failed to rename"),
 			r.photo.Name,
 			r.err.Error())
 	}
 	if r.dryrun {
 		return fmt.Sprintf("%s Would rename %s (%s)",
 			dryrunStyle.Render("(dryrun)"),
-			dryrunStyle.Render(r.photo.Name),
-			dryrunStyle.Render(r.newPath),
+			r.photo.Name,
+			dryrunStyle.Render(r.photo.RenamedPath), // TODO: here
 		)
 	}
-	return fmt.Sprintf("Renamed %s (%s)", r.photo.Name, r.newPath)
+	return fmt.Sprintf("Renamed %s (%s)", r.photo.Name, r.photo.RenamedPath)
 }
 
 func (r analyzeResultMsg) String() string {
 	if r.err != nil {
 		return fmt.Sprintf("%s %s: %v",
-			errorStyle.Render("Error!"),
+			errorStyle.Render("Failed to get exif"),
 			r.photo.Name,
 			r.err.Error())
 	}
@@ -402,17 +394,20 @@ type model struct {
 	errors         []resultMsg
 	startTime      time.Time
 	renamed, total int
+	height         int
 }
 
-const numLastResults = 30
+const maxHeight = 30
 
 func newModel(total int) model {
 	s := spinner.New()
 	s.Style = spinnerStyle
+	height := min(total, maxHeight)
 	return model{
-		progress:  progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C")),
+		height:    height,
+		progress:  progress.New(progress.WithDefaultGradient()),
 		spinner:   s,
-		results:   make([]resultMsg, numLastResults),
+		results:   make([]resultMsg, height),
 		total:     total,
 		startTime: time.Now(),
 	}
@@ -441,8 +436,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					results = append(results, result)
 				}
 			}
-			if n := len(results); n >= numLastResults {
-				m.results = append(results[n-numLastResults+1:], msg)
+			if n := len(results); n >= m.height {
+				m.results = append(results[n-m.height+1:], msg)
 			} else {
 				m.results = append(results, msg)
 			}
@@ -466,7 +461,7 @@ func (m model) View() string {
 	var s string
 
 	if m.quitting {
-		s += "That’s all for renaming! " +
+		s += "Renaming completed. " +
 			durationStyle.Render("elapsed time: "+duration(time.Since(m.startTime)).String())
 	} else {
 		s += m.spinner.View() + " Processing photos..."
@@ -487,7 +482,8 @@ func (m model) View() string {
 
 	s += "\n"
 
-	if percent := float64(m.renamed) / float64(m.total); percent < 1 && m.total > 100 {
+	showPb := m.total > 100 || time.Since(m.startTime).Seconds() > 3.0
+	if percent := float64(m.renamed) / float64(m.total); percent < 1 && showPb {
 		s += m.progress.ViewAs(percent)
 		s += "\n"
 	}
