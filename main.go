@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/barasher/go-exiftool"
+	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/gabriel-vasile/mimetype"
-	"github.com/hashicorp/go-multierror"
 	"github.com/jessevdk/go-flags"
 	"golang.org/x/sync/errgroup"
 )
@@ -29,15 +29,12 @@ var (
 )
 
 type Option struct {
-	DestDir string `short:"d" long:"dest-dir" description:"Directory path to move renamed photos" required:"false" default:""`
-	Dryrun  bool   `short:"n" long:"dry-run" description:"Displays the operations that would be performed using the specified command without actually running them" required:"false"`
-
-	GroupByDate bool `short:"t" long:"group-by-date" description:"Create a date directory and classify the photos for each date" required:"false"`
-	GroupByExt  bool `short:"e" long:"group-by-ext" description:"Create an extension directory and classify the photos for each ext" required:"false"`
-
-	Clean bool `short:"c" long:"clean" description:"Clean up directories after renaming" required:"false"`
-
-	Version bool `short:"v" long:"version" description:"Show version"`
+	DestDir     string `short:"d" long:"dest-dir" description:"The directory path where renamed photos will be moved" default:""`
+	Dryrun      bool   `short:"n" long:"dry-run" description:"Simulates the command's actions without executing them"`
+	GroupByDate bool   `short:"t" long:"group-by-date" description:"Create a directory for each date and organize photos accordingly"`
+	GroupByExt  bool   `short:"e" long:"group-by-ext" description:"Create a directory for each file extension and organize the photos accordingly"`
+	Clean       bool   `short:"c" long:"clean" description:"Remove empty directories after renaming."`
+	Version     bool   `short:"v" long:"version" description:"Show version"`
 }
 
 type Photo struct {
@@ -50,7 +47,7 @@ type Photo struct {
 
 func main() {
 	if err := runMain(); err != nil {
-		fmt.Fprintf(os.Stderr, "[ERROR] error occured while processing %s: %v\n", appName, err)
+		fmt.Fprintf(os.Stderr, "%s: %v\n", appName, err)
 		os.Exit(1)
 	}
 }
@@ -83,9 +80,13 @@ func runMain() error {
 	if err != nil {
 		return err
 	}
+
+	if len(images) == 0 {
+		return errors.New("no images given")
+	}
+
 	p := tea.NewProgram(newModel(len(images)))
 
-	var errs error
 	rename := func(photo Photo) error {
 		var newPath string
 		dest := opt.DestDir
@@ -110,14 +111,7 @@ func runMain() error {
 		}
 		p.Send(renameResultMsg{photo: photo, newPath: newPath})
 		_ = os.MkdirAll(dest, 0755)
-		if err := os.Rename(photo.Path, newPath); err != nil {
-			// Use hashicorp/go-multierror instead of errors.Join (as of Go 1.20)
-			// because this one is pretty good in output format.
-			errs = multierror.Append(
-				errs,
-				fmt.Errorf("%s: failed to rename: %w", photo.Path, err))
-		}
-		return nil
+		return os.Rename(photo.Path, newPath)
 	}
 
 	ch := make(chan Photo, len(images))
@@ -151,43 +145,38 @@ func runMain() error {
 		for photo := range ch {
 			photos = append(photos, photo)
 		}
+		if opt.Clean {
+			for _, arg := range args {
+				empty, err := isEmptyDir(arg)
+				if err != nil {
+					p.Send(cleanResultMsg{err: err})
+					continue
+				}
+				if opt.Dryrun {
+					p.Send(cleanResultMsg{dir: arg, dryrun: true})
+					continue
+				}
+				if !empty {
+					p.Send(cleanResultMsg{dir: arg, empty: false})
+					continue
+				}
+				if err := os.RemoveAll(arg); err != nil {
+					p.Send(cleanResultMsg{dir: arg, empty: true, err: err})
+				} else {
+					p.Send(cleanResultMsg{dir: arg, empty: true})
+				}
+			}
+		}
 		p.Send(finishMsg{})
 		// done <- true
 	}()
 
 	if _, err := p.Run(); err != nil {
-		fmt.Println("Error running program:", err)
-		os.Exit(1)
+		return err
 	}
 	// <-done
 
-	if opt.Clean {
-		for _, arg := range args {
-			empty, err := isEmptyDir(arg)
-			if err != nil {
-				errs = multierror.Append(errs, err)
-				continue
-			}
-			if opt.Dryrun {
-				// TODO:
-				// fmt.Printf("[INFO] (dryrun) Would remove %q if empty\n", arg)
-				continue
-			}
-			if !empty {
-				fmt.Printf("[INFO] skip to clean dir %q because NOT empty\n", arg)
-				continue
-			}
-			if err := os.RemoveAll(arg); err != nil {
-				errs = multierror.Append(
-					errs,
-					fmt.Errorf("%s: failed to remove dir: %w", arg, err))
-				continue
-			}
-			fmt.Printf("[INFO] Removed %q because empty\n", arg)
-		}
-	}
-
-	return errs
+	return nil
 }
 
 func walkDir(root string) ([]string, error) {
@@ -272,9 +261,6 @@ func analyzeExifdata(dir, file string) (Photo, error) {
 		return Photo{Name: filename}, fmt.Errorf("failed to parse createdAt: %w", err)
 	}
 
-	// TODO:
-	// return Photo{Name: filename}, fmt.Errorf("failed to parse createdAt: %w", errors.New("FAIL"))
-
 	return Photo{
 		Name:      filename,
 		Path:      sourceFile,
@@ -340,6 +326,35 @@ type renameResultMsg struct {
 	err     error
 }
 
+type cleanResultMsg struct {
+	dir    string
+	dryrun bool
+	empty  bool
+	err    error
+}
+
+func (r cleanResultMsg) Err() error { return r.err }
+
+func (r cleanResultMsg) String() string {
+	if r.err != nil {
+		return fmt.Sprintf("%s %s: %v",
+			errorStyle.Render("Error!"),
+			r.dir,
+			r.err.Error())
+	}
+	if r.dryrun {
+		return fmt.Sprintf("%s Would remove %s if empty",
+			dryrunStyle.Render("(dryrun)"),
+			dryrunStyle.Render(r.dir),
+		)
+	}
+	if r.empty {
+		return fmt.Sprintf("Removed %s because empty", r.dir)
+	} else {
+		return fmt.Sprintf("Do not remove %s because NOT empty", r.dir)
+	}
+}
+
 func (r analyzeResultMsg) Err() error { return r.err }
 func (r renameResultMsg) Err() error  { return r.err }
 
@@ -353,11 +368,11 @@ func (r renameResultMsg) String() string {
 	if r.dryrun {
 		return fmt.Sprintf("%s Would rename %s (%s)",
 			dryrunStyle.Render("(dryrun)"),
-			r.photo.Name,
-			filepath.Base(r.newPath),
+			dryrunStyle.Render(r.photo.Name),
+			dryrunStyle.Render(r.newPath),
 		)
 	}
-	return fmt.Sprintf("Renaming %s -> %s", r.photo.Name, filepath.Base(r.newPath))
+	return fmt.Sprintf("Renamed %s (%s)", r.photo.Name, r.newPath)
 }
 
 func (r analyzeResultMsg) String() string {
@@ -377,31 +392,35 @@ type resultMsg interface {
 	Err() error
 }
 
+type finishMsg struct{}
+
 type model struct {
+	progress       progress.Model
 	spinner        spinner.Model
-	errors         []resultMsg
-	results        []resultMsg
 	quitting       bool
+	results        []resultMsg
+	errors         []resultMsg
+	startTime      time.Time
 	renamed, total int
 }
 
-const numLastResults = 15
+const numLastResults = 30
 
 func newModel(total int) model {
 	s := spinner.New()
 	s.Style = spinnerStyle
 	return model{
-		spinner: s,
-		results: make([]resultMsg, numLastResults),
-		total:   total,
+		progress:  progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C")),
+		spinner:   s,
+		results:   make([]resultMsg, numLastResults),
+		total:     total,
+		startTime: time.Now(),
 	}
 }
 
 func (m model) Init() tea.Cmd {
 	return m.spinner.Tick
 }
-
-type finishMsg struct{}
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -447,7 +466,8 @@ func (m model) View() string {
 	var s string
 
 	if m.quitting {
-		s += "That’s all for renaming!"
+		s += "That’s all for renaming! " +
+			durationStyle.Render("elapsed time: "+duration(time.Since(m.startTime)).String())
 	} else {
 		s += m.spinner.View() + " Processing photos..."
 	}
@@ -457,7 +477,7 @@ func (m model) View() string {
 
 	for _, res := range m.results {
 		switch res.(type) {
-		case analyzeResultMsg, renameResultMsg:
+		case analyzeResultMsg, renameResultMsg, cleanResultMsg:
 			s += res.String()
 		default:
 			s += dotStyle.Render(strings.Repeat(".", 30))
@@ -466,6 +486,11 @@ func (m model) View() string {
 	}
 
 	s += "\n"
+
+	if percent := float64(m.renamed) / float64(m.total); percent < 1 && m.total > 100 {
+		s += m.progress.ViewAs(percent)
+		s += "\n"
+	}
 
 	return appStyle.Render(s)
 }
