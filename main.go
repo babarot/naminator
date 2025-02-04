@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/jessevdk/go-flags"
+	"golang.org/x/term"
 )
 
 const appName = "naminator"
@@ -419,17 +420,18 @@ func (r renameResultMsg) String() string {
 			errorStyle.Render(fmt.Sprintf("%-7s", "FAILED")),
 			r.err.Error())
 	}
+	renamedPath := strings.ReplaceAll(r.photo.RenamedPath, os.Getenv("HOME"), "~")
 	if r.dryrun {
 		return fmt.Sprintf("%s: %s Would rename %s",
 			r.photo.Name,
 			dryrunStyle.Render("DRY-RUN"),
-			dryrunStyle.Render("-> "+r.photo.RenamedPath),
+			dryrunStyle.Render("-> "+renamedPath),
 		)
 	}
 	return fmt.Sprintf("%s: %s Renamed to %s",
 		r.photo.Name,
 		okStyle.Render(fmt.Sprintf("%-7s", "OK")),
-		r.photo.RenamedPath)
+		renamedPath)
 }
 
 func (r analyzeResultMsg) String() string {
@@ -464,7 +466,12 @@ func newModel(total int) model {
 		spinner.WithSpinner(spinner.Line),
 		spinner.WithStyle(spinnerStyle),
 	)
-	height := min(total, maxHeight)
+	_, termHeight, _ := term.GetSize(int(os.Stdout.Fd()))
+	minHeight := termHeight - 9
+	if minHeight < 0 {
+		minHeight = 1
+	}
+	height := min(total, minHeight, maxHeight)
 	return model{
 		progress:     progress.New(progress.WithDefaultGradient()),
 		spinner:      s,
@@ -489,24 +496,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case resultMsg:
 		if msg.Err() != nil {
+			// If the message contains an error, add it to the errorResults slice.
 			m.errorResults = append(m.errorResults, msg)
 		}
 		if len(m.errorResults) > 0 {
+			// If there are any recorded errors, rebuild the results slice.
+			// The goal is to highlight error messages (retain them in the slice)
+			// while receiving other new messages.
 			var met bool
 			var results []resultMsg
 			for _, result := range m.results {
 				if (result == nil || result.Err() == nil) && !met {
+					// Skip the first non-error message encountered.
+					// This ensures that when an error occurs, a regular message is removed
+					// to make space while keeping error messages visible.
 					met = true
 				} else {
+					// Retain all other messages.
 					results = append(results, result)
 				}
 			}
 			if n := len(results); n >= m.height {
+				// If the number of messages exceeds the allowed height, trim the oldest ones.
+				// This prevents the list from growing indefinitely while keeping recent messages.
 				m.results = append(results[n-m.height+1:], msg)
 			} else {
+				// Otherwise, simply append the new message.
 				m.results = append(results, msg)
 			}
 		} else {
+			// If there are no errors, maintain a fixed-length message history.
+			// Remove the oldest message (first element) and append the new message.
+			// This ensures the message list remains within the allowed height.
 			m.results = append(m.results[1:], msg)
 		}
 		if _, ok := msg.(analyzeResultMsg); ok {
