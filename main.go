@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,15 +84,34 @@ func runMain() error {
 		return errors.New("no images given")
 	}
 
+	logFile, err := os.OpenFile("debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer logFile.Close()
+
+	logger := slog.New(slog.NewJSONHandler(
+		logFile,
+		&slog.HandlerOptions{Level: slog.LevelDebug}))
+	slog.SetDefault(logger)
+
+	slog.Debug("start")
+	defer slog.Debug("end")
+
 	p := tea.NewProgram(newModel(len(images)))
+
+	var wg sync.WaitGroup
 
 	rename := func(photo Photo) (Photo, bool, error) {
 		var newPath string
 		dest := opt.DestDir
 		if dest == "" {
 			dest = photo.Dir
+			// get the parent directory of the current directory to create a new parent directory
+			if opt.GroupByDate || opt.GroupByExt {
+				dest = filepath.Dir(dest)
+			}
 		}
-		baseDir := dest // keep dest at this point
 		if opt.GroupByDate {
 			dt := photo.CreatedAt.Format("2006-01-02")
 			dest = filepath.Join(dest, dt)
@@ -104,16 +124,13 @@ func runMain() error {
 			photo.CreatedAt.Format("2006-01-02_15-04-05"),
 			photo.Extension,
 		))
-		photo.RenamedPath = strings.TrimLeft(newPath, baseDir)
-		// photo.RenamedPath = newPath
+		photo.RenamedPath = newPath
 		if opt.Dryrun {
 			return photo, true, nil
 		}
 		_ = os.MkdirAll(dest, 0755)
 		return photo, false, os.Rename(photo.Path, newPath)
 	}
-
-	var wg sync.WaitGroup
 
 	for _, image := range images {
 		imagePath := image
@@ -127,11 +144,22 @@ func runMain() error {
 				duration: duration(time.Since(start)),
 				err:      err,
 			})
+			if err != nil {
+				slog.Error("failed to get exif", "name", photo.Name, "err", err)
+				slog.Error("skip to rename", "name", photo.Name, "err", err)
+				return
+			}
+			slog.Debug("got exif", "name", photo.Name)
 			photo, dryrun, err := rename(photo)
 			if dryrun {
 				p.Send(renameResultMsg{photo: photo, dryrun: true})
 			} else {
 				p.Send(renameResultMsg{photo: photo, dryrun: false, err: err})
+			}
+			if err != nil {
+				slog.Error("failed to rename", "name", photo.Name, "from", photo.Path, "to", photo.RenamedPath, "err", err)
+			} else {
+				slog.Debug("renamed", "name", photo.Name, "from", photo.Path, "to", photo.RenamedPath)
 			}
 		}()
 	}
@@ -146,18 +174,19 @@ func runMain() error {
 					p.Send(cleanResultMsg{err: err})
 					continue
 				}
+				dir := filepath.Base(arg)
 				if opt.Dryrun {
-					p.Send(cleanResultMsg{dir: arg, dryrun: true})
+					p.Send(cleanResultMsg{dir: dir, dryrun: true})
 					continue
 				}
 				if !empty {
-					p.Send(cleanResultMsg{dir: arg, empty: false})
+					p.Send(cleanResultMsg{dir: dir, empty: false})
 					continue
 				}
 				if err := os.RemoveAll(arg); err != nil {
-					p.Send(cleanResultMsg{dir: arg, empty: true, err: err})
+					p.Send(cleanResultMsg{dir: dir, empty: true, err: err})
 				} else {
-					p.Send(cleanResultMsg{dir: arg, empty: true})
+					p.Send(cleanResultMsg{dir: dir, empty: true})
 				}
 			}
 		}
@@ -215,7 +244,6 @@ func analyzeExifdata(path string) (Photo, error) {
 	defer et.Close()
 
 	base := filepath.Base(path)
-	dir := filepath.Dir(path)
 	fileInfos := et.ExtractMetadata(path)
 	if len(fileInfos) == 0 {
 		return Photo{Name: base}, errors.New("failed to extract metadata")
@@ -256,7 +284,7 @@ func analyzeExifdata(path string) (Photo, error) {
 	return Photo{
 		Name:      filename,
 		Path:      sourceFile,
-		Dir:       filepath.Dir(dir), // dir of given path (dir).
+		Dir:       filepath.Dir(path),
 		Extension: ext,
 		CreatedAt: createdAt,
 	}, nil
@@ -292,9 +320,10 @@ var (
 	spinnerStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("63"))
 	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Margin(1, 0)
 	dotStyle      = helpStyle.UnsetMargins()
-	durationStyle = dotStyle
+	durationStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFDD0")) // FFF9B1
 	dryrunStyle   = dotStyle
-	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#c53b53"))
+	okStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#bbe896"))
+	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#D94F70"))
 	appStyle      = lipgloss.NewStyle().Margin(1, 2, 0, 2)
 )
 
@@ -334,15 +363,17 @@ func (r cleanResultMsg) String() string {
 			r.err.Error())
 	}
 	if r.dryrun {
-		return fmt.Sprintf("%s Would remove %s if empty",
-			dryrunStyle.Render("(dryrun)"),
+		return fmt.Sprintf("%s: %s Would remove if empty",
 			r.dir,
+			dryrunStyle.Render("(dryrun)"),
 		)
 	}
 	if r.empty {
-		return fmt.Sprintf("Removed %s because empty", r.dir)
+		return fmt.Sprintf("%s: %s Removed because empty",
+			r.dir,
+			okStyle.Render("OK"))
 	} else {
-		return fmt.Sprintf("Do not remove %s because NOT empty", r.dir)
+		return fmt.Sprintf("%s: Do not remove because NOT empty", r.dir)
 	}
 }
 
@@ -358,13 +389,16 @@ func (r renameResultMsg) String() string {
 			r.err.Error())
 	}
 	if r.dryrun {
-		return fmt.Sprintf("%s Would rename %s (%s)",
-			dryrunStyle.Render("(dryrun)"),
+		return fmt.Sprintf("%s: %s Would rename %s",
 			r.photo.Name,
-			dryrunStyle.Render(r.photo.RenamedPath), // TODO: here
+			dryrunStyle.Render("(dryrun)"),
+			dryrunStyle.Render("-> "+r.photo.RenamedPath),
 		)
 	}
-	return fmt.Sprintf("Renamed %s (%s)", r.photo.Name, r.photo.RenamedPath)
+	return fmt.Sprintf("%s: %s Renamed to %s",
+		r.photo.Name,
+		okStyle.Render("OK"),
+		r.photo.RenamedPath)
 }
 
 func (r analyzeResultMsg) String() string {
@@ -374,8 +408,9 @@ func (r analyzeResultMsg) String() string {
 			r.photo.Name,
 			r.err.Error())
 	}
-	return fmt.Sprintf("Analyzing exif %s %s",
+	return fmt.Sprintf("%s: %s Got exif data %s",
 		r.photo.Name,
+		okStyle.Render("OK"),
 		durationStyle.Render(r.duration.String()))
 }
 
@@ -387,14 +422,15 @@ type resultMsg interface {
 type finishMsg struct{}
 
 type model struct {
-	progress       progress.Model
-	spinner        spinner.Model
-	quitting       bool
-	results        []resultMsg
-	errors         []resultMsg
-	startTime      time.Time
-	renamed, total int
-	height         int
+	progress     progress.Model
+	spinner      spinner.Model
+	quitting     bool
+	results      []resultMsg
+	errorResults []resultMsg
+	startTime    time.Time
+	processed    int
+	total        int
+	height       int
 }
 
 const maxHeight = 30
@@ -404,12 +440,15 @@ func newModel(total int) model {
 	s.Style = spinnerStyle
 	height := min(total, maxHeight)
 	return model{
-		height:    height,
-		progress:  progress.New(progress.WithDefaultGradient()),
-		spinner:   s,
-		results:   make([]resultMsg, height),
-		total:     total,
-		startTime: time.Now(),
+		progress:     progress.New(progress.WithDefaultGradient()),
+		spinner:      s,
+		quitting:     false,
+		results:      make([]resultMsg, height),
+		errorResults: nil,
+		startTime:    time.Now(),
+		processed:    0,
+		total:        total,
+		height:       height,
 	}
 }
 
@@ -424,9 +463,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case resultMsg:
 		if msg.Err() != nil {
-			m.errors = append(m.errors, msg)
+			m.errorResults = append(m.errorResults, msg)
 		}
-		if len(m.errors) > 0 {
+		if len(m.errorResults) > 0 {
 			var met bool
 			var results []resultMsg
 			for _, result := range m.results {
@@ -444,8 +483,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.results = append(m.results[1:], msg)
 		}
-		if _, ok := msg.(renameResultMsg); ok {
-			m.renamed++
+		if _, ok := msg.(analyzeResultMsg); ok {
+			m.processed++
 		}
 		return m, nil
 	case spinner.TickMsg:
@@ -461,12 +500,12 @@ func (m model) View() string {
 	var s string
 
 	if m.quitting {
-		s += "Renaming completed. " +
-			durationStyle.Render("elapsed time: "+duration(time.Since(m.startTime)).String())
+		s += "Renaming completed. Total elapsed time: " +
+			duration(time.Since(m.startTime)).String()
 	} else {
 		s += m.spinner.View() + " Processing photos..."
 	}
-	s += fmt.Sprintf(" (%d/%d)", m.renamed, m.total)
+	s += fmt.Sprintf(" (%d/%d)", m.processed, m.total)
 
 	s += "\n\n"
 
@@ -483,7 +522,7 @@ func (m model) View() string {
 	s += "\n"
 
 	showPb := m.total > 100 || time.Since(m.startTime).Seconds() > 3.0
-	if percent := float64(m.renamed) / float64(m.total); percent < 1 && showPb {
+	if percent := float64(m.processed) / float64(m.total); percent < 1 && showPb {
 		s += m.progress.ViewAs(percent)
 		s += "\n"
 	}
