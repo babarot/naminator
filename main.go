@@ -46,6 +46,14 @@ type Photo struct {
 	CreatedAt   time.Time
 }
 
+type CLI struct {
+	args   []string
+	opt    Option
+	logger *slog.Logger
+	p      *tea.Program
+	images []string
+}
+
 func main() {
 	if err := runMain(); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", appName, err)
@@ -90,116 +98,130 @@ func runMain() error {
 	}
 	defer logFile.Close()
 
-	logger := slog.New(slog.NewJSONHandler(
-		logFile,
-		&slog.HandlerOptions{Level: slog.LevelDebug}))
-	slog.SetDefault(logger)
+	cli := CLI{
+		args: args,
+		opt:  opt,
+		logger: slog.New(slog.NewJSONHandler(
+			logFile,
+			&slog.HandlerOptions{Level: slog.LevelDebug}),
+		),
+		p:      tea.NewProgram(newModel(len(images))),
+		images: images,
+	}
 
-	slog.Debug("start")
-	defer slog.Debug("end")
+	return cli.run()
+}
 
-	p := tea.NewProgram(newModel(len(images)))
+func (c CLI) run() error {
+	c.logger.Debug("start")
+	defer c.logger.Debug("end")
 
 	var wg sync.WaitGroup
 
-	rename := func(photo Photo) (Photo, bool, error) {
-		var newPath string
-		dest := opt.DestDir
-		if dest == "" {
-			dest = photo.Dir
-			// get the parent directory of the current directory to create a new parent directory
-			if opt.GroupByDate || opt.GroupByExt {
-				dest = filepath.Dir(dest)
-			}
-		}
-		if opt.GroupByDate {
-			dt := photo.CreatedAt.Format("2006-01-02")
-			dest = filepath.Join(dest, dt)
-		}
-		if opt.GroupByExt {
-			ext := getExt(photo.Path)
-			dest = filepath.Join(dest, ext)
-		}
-		newPath = filepath.Join(dest, fmt.Sprintf("%s.%s",
-			photo.CreatedAt.Format("2006-01-02_15-04-05"),
-			photo.Extension,
-		))
-		photo.RenamedPath = newPath
-		if opt.Dryrun {
-			return photo, true, nil
-		}
-		_ = os.MkdirAll(dest, 0755)
-		return photo, false, os.Rename(photo.Path, newPath)
-	}
-
-	for _, image := range images {
+	for _, image := range c.images {
 		imagePath := image
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			start := time.Now()
 			photo, err := analyzeExifdata(imagePath)
-			p.Send(analyzeResultMsg{
+			c.p.Send(analyzeResultMsg{
 				photo:    photo,
 				duration: duration(time.Since(start)),
 				err:      err,
 			})
 			if err != nil {
-				slog.Error("failed to get exif", "name", photo.Name, "err", err)
-				slog.Error("skip to rename", "name", photo.Name, "err", err)
+				c.logger.Error("failed to get exif, so skip to rename", "name", photo.Name, "err", err)
 				return
 			}
-			slog.Debug("got exif", "name", photo.Name)
-			photo, dryrun, err := rename(photo)
+			photo, dryrun, err := c.rename(photo)
 			if dryrun {
-				p.Send(renameResultMsg{photo: photo, dryrun: true})
+				c.p.Send(renameResultMsg{photo: photo, dryrun: true})
 			} else {
-				p.Send(renameResultMsg{photo: photo, dryrun: false, err: err})
+				c.p.Send(renameResultMsg{photo: photo, dryrun: false, err: err})
 			}
 			if err != nil {
-				slog.Error("failed to rename", "name", photo.Name, "from", photo.Path, "to", photo.RenamedPath, "err", err)
+				c.logger.Error("failed to rename", "name", photo.Name,
+					"from", photo.Path,
+					"to", photo.RenamedPath,
+					"err", err)
 			} else {
-				slog.Debug("renamed", "name", photo.Name, "from", photo.Path, "to", photo.RenamedPath)
+				c.logger.Debug("renamed",
+					"name", photo.Name,
+					"from", photo.Path,
+					"to", photo.RenamedPath)
 			}
 		}()
 	}
 
-	// done := make(chan bool)
 	go func() {
 		wg.Wait()
-		if opt.Clean {
-			for _, arg := range args {
-				empty, err := isEmptyDir(arg)
-				if err != nil {
-					p.Send(cleanResultMsg{err: err})
-					continue
-				}
-				dir := filepath.Base(arg)
-				if opt.Dryrun {
-					p.Send(cleanResultMsg{dir: dir, dryrun: true})
-					continue
-				}
-				if !empty {
-					p.Send(cleanResultMsg{dir: dir, empty: false})
-					continue
-				}
-				if err := os.RemoveAll(arg); err != nil {
-					p.Send(cleanResultMsg{dir: dir, empty: true, err: err})
-				} else {
-					p.Send(cleanResultMsg{dir: dir, empty: true})
-				}
-			}
-		}
-		p.Send(finishMsg{})
-		// done <- true
+		c.clean(c.args)
+		c.p.Send(finishMsg{})
 	}()
 
-	if _, err := p.Run(); err != nil {
+	if _, err := c.p.Run(); err != nil {
 		return err
 	}
-	// <-done
 
 	return nil
+}
+
+func (c CLI) rename(photo Photo) (Photo, bool, error) {
+	var newPath string
+	dest := c.opt.DestDir
+	if dest == "" {
+		dest = photo.Dir
+		// get the parent directory of the current directory to create a new parent directory
+		if c.opt.GroupByDate || c.opt.GroupByExt {
+			dest = filepath.Dir(dest)
+		}
+	}
+	if c.opt.GroupByDate {
+		dt := photo.CreatedAt.Format("2006-01-02")
+		dest = filepath.Join(dest, dt)
+	}
+	if c.opt.GroupByExt {
+		ext := getExt(photo.Path)
+		dest = filepath.Join(dest, ext)
+	}
+	newPath = filepath.Join(dest, fmt.Sprintf("%s.%s",
+		photo.CreatedAt.Format("2006-01-02_15-04-05"),
+		photo.Extension,
+	))
+	photo.RenamedPath = newPath
+	if c.opt.Dryrun {
+		return photo, true, nil
+	}
+	_ = os.MkdirAll(dest, 0755)
+	return photo, false, os.Rename(photo.Path, newPath)
+}
+
+func (c CLI) clean(paths []string) {
+	if !c.opt.Clean {
+		return
+	}
+	for _, path := range paths {
+		empty, err := isEmptyDir(path)
+		if err != nil {
+			c.p.Send(cleanResultMsg{err: err})
+			continue
+		}
+		base := filepath.Base(path)
+		if c.opt.Dryrun {
+			c.p.Send(cleanResultMsg{dir: base, dryrun: true})
+			continue
+		}
+		if !empty {
+			c.p.Send(cleanResultMsg{dir: base, empty: false})
+			continue
+		}
+		if err := os.RemoveAll(path); err != nil {
+			c.p.Send(cleanResultMsg{dir: base, empty: true, err: err})
+		} else {
+			c.p.Send(cleanResultMsg{dir: base, empty: true})
+		}
+	}
 }
 
 func walkDir(root string) ([]string, error) {
@@ -322,7 +344,8 @@ var (
 	dotStyle      = helpStyle.UnsetMargins()
 	durationStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFDD0")) // FFF9B1
 	dryrunStyle   = dotStyle
-	okStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#bbe896"))
+	okStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#BBE896"))
+	warnStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFC999"))
 	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#D94F70"))
 	appStyle      = lipgloss.NewStyle().Margin(1, 2, 0, 2)
 )
@@ -353,27 +376,35 @@ type cleanResultMsg struct {
 	err    error
 }
 
+type resultMsg interface {
+	String() string
+	Err() error
+}
+
+type finishMsg struct{}
+
 func (r cleanResultMsg) Err() error { return r.err }
 
 func (r cleanResultMsg) String() string {
 	if r.err != nil {
-		return fmt.Sprintf("%s %s: %v",
-			errorStyle.Render("Failed to cleanup"),
+		return fmt.Sprintf("%s: %s %v",
 			r.dir,
+			errorStyle.Render(fmt.Sprintf("%-7s", "FAILED")),
 			r.err.Error())
 	}
 	if r.dryrun {
 		return fmt.Sprintf("%s: %s Would remove if empty",
 			r.dir,
-			dryrunStyle.Render("(dryrun)"),
-		)
+			dryrunStyle.Render(fmt.Sprintf("%-7s", "DRY-RUN")))
 	}
 	if r.empty {
 		return fmt.Sprintf("%s: %s Removed because empty",
 			r.dir,
-			okStyle.Render("OK"))
+			okStyle.Render(fmt.Sprintf("%-7s", "OK")))
 	} else {
-		return fmt.Sprintf("%s: Do not remove because NOT empty", r.dir)
+		return fmt.Sprintf("%s: %s Do not remove because NOT empty",
+			r.dir,
+			warnStyle.Render(fmt.Sprintf("%-7s", "SKIP")))
 	}
 }
 
@@ -383,43 +414,36 @@ func (r renameResultMsg) Err() error { return r.err }
 
 func (r renameResultMsg) String() string {
 	if r.err != nil {
-		return fmt.Sprintf("%s %s: %v",
-			errorStyle.Render("Failed to rename"),
+		return fmt.Sprintf("%s: %s %v",
 			r.photo.Name,
+			errorStyle.Render(fmt.Sprintf("%-7s", "FAILED")),
 			r.err.Error())
 	}
 	if r.dryrun {
 		return fmt.Sprintf("%s: %s Would rename %s",
 			r.photo.Name,
-			dryrunStyle.Render("(dryrun)"),
+			dryrunStyle.Render("DRY-RUN"),
 			dryrunStyle.Render("-> "+r.photo.RenamedPath),
 		)
 	}
 	return fmt.Sprintf("%s: %s Renamed to %s",
 		r.photo.Name,
-		okStyle.Render("OK"),
+		okStyle.Render(fmt.Sprintf("%-7s", "OK")),
 		r.photo.RenamedPath)
 }
 
 func (r analyzeResultMsg) String() string {
 	if r.err != nil {
-		return fmt.Sprintf("%s %s: %v",
-			errorStyle.Render("Failed to get exif"),
+		return fmt.Sprintf("%s: %s %v",
 			r.photo.Name,
+			errorStyle.Render(fmt.Sprintf("%-7s", "FAILED")),
 			r.err.Error())
 	}
 	return fmt.Sprintf("%s: %s Got exif data %s",
 		r.photo.Name,
-		okStyle.Render("OK"),
+		okStyle.Render(fmt.Sprintf("%-7s", "OK")),
 		durationStyle.Render(r.duration.String()))
 }
-
-type resultMsg interface {
-	String() string
-	Err() error
-}
-
-type finishMsg struct{}
 
 type model struct {
 	progress     progress.Model
@@ -436,8 +460,10 @@ type model struct {
 const maxHeight = 30
 
 func newModel(total int) model {
-	s := spinner.New()
-	s.Style = spinnerStyle
+	s := spinner.New(
+		spinner.WithSpinner(spinner.Line),
+		spinner.WithStyle(spinnerStyle),
+	)
 	height := min(total, maxHeight)
 	return model{
 		progress:     progress.New(progress.WithDefaultGradient()),
