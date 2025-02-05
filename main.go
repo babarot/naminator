@@ -34,7 +34,7 @@ type Option struct {
 	Dryrun      bool   `short:"n" long:"dry-run" description:"Simulates the command's actions without executing them"`
 	GroupByDate bool   `short:"t" long:"group-by-date" description:"Create a directory for each date and organize photos accordingly"`
 	GroupByExt  bool   `short:"e" long:"group-by-ext" description:"Create a directory for each file extension and organize the photos accordingly"`
-	Clean       bool   `short:"c" long:"clean" description:"Remove empty directories after renaming."`
+	Clean       bool   `short:"c" long:"clean" description:"Remove empty directories after renaming"`
 	Version     bool   `short:"v" long:"version" description:"Show version"`
 }
 
@@ -543,6 +543,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
+var (
+	showProgressSet bool
+	showProgress    bool
+)
+
 func (m model) View() string {
 	var s string
 
@@ -561,6 +566,7 @@ func (m model) View() string {
 		case analyzeResultMsg, renameResultMsg, cleanResultMsg:
 			s += res.String()
 		default:
+			// default is resultMsg (interface)
 			s += dotStyle.Render(strings.Repeat(".", 30))
 		}
 		s += "\n"
@@ -568,8 +574,12 @@ func (m model) View() string {
 
 	s += "\n"
 
-	showPb := m.total > 100 || time.Since(m.startTime).Seconds() > 3.0
-	if percent := float64(m.processed) / float64(m.total); percent < 1 && showPb {
+	percent := float64(m.processed) / float64(m.total)
+	if time.Since(m.startTime).Seconds() > 3.0 && !showProgressSet {
+		showProgress = percent < 0.25
+		showProgressSet = true
+	}
+	if percent < 1 && (m.total > 100 || showProgress) {
 		s += m.progress.ViewAs(percent)
 		s += "\n"
 	}
