@@ -13,13 +13,9 @@ import (
 	"time"
 
 	"github.com/barasher/go-exiftool"
-	"github.com/charmbracelet/bubbles/progress"
-	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/jessevdk/go-flags"
-	"golang.org/x/term"
 )
 
 const appName = "naminator"
@@ -36,15 +32,6 @@ type Option struct {
 	GroupByExt  bool   `short:"e" long:"group-by-ext" description:"Create a directory for each file extension and organize the photos accordingly"`
 	Clean       bool   `short:"c" long:"clean" description:"Remove empty directories after renaming"`
 	Version     bool   `short:"v" long:"version" description:"Show version"`
-}
-
-type Photo struct {
-	Name        string
-	Path        string
-	RenamedPath string
-	Dir         string
-	Extension   string
-	CreatedAt   time.Time
 }
 
 type CLI struct {
@@ -113,6 +100,13 @@ func runMain() error {
 	return cli.run()
 }
 
+type duration time.Duration
+
+func (d duration) String() string {
+	sec := float64(d) / float64(time.Second)
+	return fmt.Sprintf("%.2fs", sec)
+}
+
 func (c CLI) run() error {
 	c.logger.Debug("start")
 	defer c.logger.Debug("end")
@@ -156,11 +150,17 @@ func (c CLI) run() error {
 	}
 
 	go func() {
+		// Wait for all goroutines handling photo processing to complete
 		wg.Wait()
+		// Remove empty directories after processing is done
 		c.clean(c.args)
+		// Signal completion to stop UI rendering
 		c.p.Send(finishMsg{})
 	}()
 
+	// No need to wait for the goroutine explicitly, as c.p.Run() blocks
+	// until it receives finishMsg{}. The cleanup and message sending
+	// happen in a separate goroutine, ensuring that Run() eventually exits.
 	if _, err := c.p.Run(); err != nil {
 		return err
 	}
@@ -182,6 +182,7 @@ func (c CLI) rename(photo Photo) (Photo, bool, error) {
 		dt := photo.CreatedAt.Format("2006-01-02")
 		dest = filepath.Join(dest, dt)
 	}
+
 	if c.opt.GroupByExt {
 		ext := getExt(photo.Path)
 		dest = filepath.Join(dest, ext)
@@ -225,38 +226,13 @@ func (c CLI) clean(paths []string) {
 	}
 }
 
-func walkDir(root string) ([]string, error) {
-	files := []string{}
-	err := filepath.WalkDir(root, func(path string, info fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		files = append(files, path)
-		return nil
-	})
-	return files, err
-}
-
-func getImages(dirs []string) ([]string, error) {
-	var images []string
-	for _, dir := range dirs {
-		files, err := walkDir(dir)
-		if err != nil {
-			return []string{}, err
-		}
-		for _, file := range files {
-			file := file
-			mime, _ := mimetype.DetectFile(file)
-			if !strings.Contains(mime.String(), "image") {
-				continue
-			}
-			images = append(images, file)
-		}
-	}
-	return images, nil
+type Photo struct {
+	Name        string
+	Path        string
+	RenamedPath string
+	Dir         string
+	Extension   string
+	CreatedAt   time.Time
 }
 
 func analyzeExifdata(path string) (Photo, error) {
@@ -313,6 +289,40 @@ func analyzeExifdata(path string) (Photo, error) {
 	}, nil
 }
 
+func walkDir(root string) ([]string, error) {
+	files := []string{}
+	err := filepath.WalkDir(root, func(path string, info fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		files = append(files, path)
+		return nil
+	})
+	return files, err
+}
+
+func getImages(dirs []string) ([]string, error) {
+	var images []string
+	for _, dir := range dirs {
+		files, err := walkDir(dir)
+		if err != nil {
+			return []string{}, err
+		}
+		for _, file := range files {
+			file := file
+			mime, _ := mimetype.DetectFile(file)
+			if !strings.Contains(mime.String(), "image") {
+				continue
+			}
+			images = append(images, file)
+		}
+	}
+	return images, nil
+}
+
 func getExt(file string) string {
 	ext := filepath.Ext(file)
 	switch ext {
@@ -337,252 +347,4 @@ func isEmptyDir(name string) (bool, error) {
 		return true, nil
 	}
 	return false, err // Either not empty or error, suits both cases
-}
-
-var (
-	spinnerStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("63"))
-	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Margin(1, 0)
-	dotStyle      = helpStyle.UnsetMargins()
-	durationStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFDD0")) // FFF9B1
-	dryrunStyle   = dotStyle
-	okStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#BBE896"))
-	warnStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFC999"))
-	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#D94F70"))
-	appStyle      = lipgloss.NewStyle().Margin(1, 2, 0, 2)
-)
-
-type duration time.Duration
-
-func (d duration) String() string {
-	sec := float64(d) / float64(time.Second)
-	return fmt.Sprintf("%.2fs", sec)
-}
-
-type analyzeResultMsg struct {
-	photo    Photo
-	duration duration
-	err      error
-}
-
-type renameResultMsg struct {
-	photo  Photo
-	dryrun bool
-	err    error
-}
-
-type cleanResultMsg struct {
-	dir    string
-	dryrun bool
-	empty  bool
-	err    error
-}
-
-type resultMsg interface {
-	String() string
-	Err() error
-}
-
-type finishMsg struct{}
-
-func (r cleanResultMsg) Err() error { return r.err }
-
-func (r cleanResultMsg) String() string {
-	if r.err != nil {
-		return fmt.Sprintf("%s: %s %v",
-			r.dir,
-			errorStyle.Render(fmt.Sprintf("%-7s", "FAILED")),
-			r.err.Error())
-	}
-	if r.dryrun {
-		return fmt.Sprintf("%s: %s Would remove if empty",
-			r.dir,
-			dryrunStyle.Render(fmt.Sprintf("%-7s", "DRY-RUN")))
-	}
-	if r.empty {
-		return fmt.Sprintf("%s: %s Removed because empty",
-			r.dir,
-			okStyle.Render(fmt.Sprintf("%-7s", "OK")))
-	} else {
-		return fmt.Sprintf("%s: %s Do not remove because NOT empty",
-			r.dir,
-			warnStyle.Render(fmt.Sprintf("%-7s", "SKIP")))
-	}
-}
-
-func (r analyzeResultMsg) Err() error { return r.err }
-
-func (r renameResultMsg) Err() error { return r.err }
-
-func (r renameResultMsg) String() string {
-	if r.err != nil {
-		return fmt.Sprintf("%s: %s %v",
-			r.photo.Name,
-			errorStyle.Render(fmt.Sprintf("%-7s", "FAILED")),
-			r.err.Error())
-	}
-	renamedPath := strings.ReplaceAll(r.photo.RenamedPath, os.Getenv("HOME"), "~")
-	if r.dryrun {
-		return fmt.Sprintf("%s: %s Would rename %s",
-			r.photo.Name,
-			dryrunStyle.Render("DRY-RUN"),
-			dryrunStyle.Render("-> "+renamedPath),
-		)
-	}
-	return fmt.Sprintf("%s: %s Renamed to %s",
-		r.photo.Name,
-		okStyle.Render(fmt.Sprintf("%-7s", "OK")),
-		renamedPath)
-}
-
-func (r analyzeResultMsg) String() string {
-	if r.err != nil {
-		return fmt.Sprintf("%s: %s %v",
-			r.photo.Name,
-			errorStyle.Render(fmt.Sprintf("%-7s", "FAILED")),
-			r.err.Error())
-	}
-	return fmt.Sprintf("%s: %s Got exif data %s",
-		r.photo.Name,
-		okStyle.Render(fmt.Sprintf("%-7s", "OK")),
-		durationStyle.Render(r.duration.String()))
-}
-
-type model struct {
-	progress     progress.Model
-	spinner      spinner.Model
-	quitting     bool
-	results      []resultMsg
-	errorResults []resultMsg
-	startTime    time.Time
-	processed    int
-	total        int
-	height       int
-}
-
-const maxHeight = 30
-
-func newModel(total int) model {
-	s := spinner.New(
-		spinner.WithSpinner(spinner.Line),
-		spinner.WithStyle(spinnerStyle),
-	)
-	_, termHeight, _ := term.GetSize(int(os.Stdout.Fd()))
-	minHeight := termHeight - 9
-	if minHeight < 0 {
-		minHeight = 1
-	}
-	height := min(total, minHeight, maxHeight)
-	return model{
-		progress:     progress.New(progress.WithDefaultGradient()),
-		spinner:      s,
-		quitting:     false,
-		results:      make([]resultMsg, height),
-		errorResults: nil,
-		startTime:    time.Now(),
-		processed:    0,
-		total:        total,
-		height:       height,
-	}
-}
-
-func (m model) Init() tea.Cmd {
-	return m.spinner.Tick
-}
-
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case finishMsg:
-		m.quitting = true
-		return m, tea.Quit
-	case resultMsg:
-		if msg.Err() != nil {
-			// If the message contains an error, add it to the errorResults slice.
-			m.errorResults = append(m.errorResults, msg)
-		}
-		if len(m.errorResults) > 0 {
-			// If there are any recorded errors, rebuild the results slice.
-			// The goal is to highlight error messages (retain them in the slice)
-			// while receiving other new messages.
-			var met bool
-			var results []resultMsg
-			for _, result := range m.results {
-				if (result == nil || result.Err() == nil) && !met {
-					// Skip the first non-error message encountered.
-					// This ensures that when an error occurs, a regular message is removed
-					// to make space while keeping error messages visible.
-					met = true
-				} else {
-					// Retain all other messages.
-					results = append(results, result)
-				}
-			}
-			if n := len(results); n >= m.height {
-				// If the number of messages exceeds the allowed height, trim the oldest ones.
-				// This prevents the list from growing indefinitely while keeping recent messages.
-				m.results = append(results[n-m.height+1:], msg)
-			} else {
-				// Otherwise, simply append the new message.
-				m.results = append(results, msg)
-			}
-		} else {
-			// If there are no errors, maintain a fixed-length message history.
-			// Remove the oldest message (first element) and append the new message.
-			// This ensures the message list remains within the allowed height.
-			m.results = append(m.results[1:], msg)
-		}
-		if _, ok := msg.(analyzeResultMsg); ok {
-			m.processed++
-		}
-		return m, nil
-	case spinner.TickMsg:
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
-		return m, cmd
-	default:
-		return m, nil
-	}
-}
-
-var (
-	showProgressSet bool
-	showProgress    bool
-)
-
-func (m model) View() string {
-	var s string
-
-	if m.quitting {
-		s += "Renaming completed. Total elapsed time: " +
-			duration(time.Since(m.startTime)).String()
-	} else {
-		s += m.spinner.View() + " Processing photos..."
-	}
-	s += fmt.Sprintf(" (%d/%d)", m.processed, m.total)
-
-	s += "\n\n"
-
-	for _, res := range m.results {
-		switch res.(type) {
-		case analyzeResultMsg, renameResultMsg, cleanResultMsg:
-			s += res.String()
-		default:
-			// default is resultMsg (interface)
-			s += dotStyle.Render(strings.Repeat(".", 30))
-		}
-		s += "\n"
-	}
-
-	s += "\n"
-
-	percent := float64(m.processed) / float64(m.total)
-	if time.Since(m.startTime).Seconds() > 3.0 && !showProgressSet {
-		showProgress = percent < 0.25
-		showProgressSet = true
-	}
-	if percent < 1 && (m.total > 100 || showProgress) {
-		s += m.progress.ViewAs(percent)
-		s += "\n"
-	}
-
-	return appStyle.Render(s)
 }
