@@ -9,8 +9,9 @@ import (
 type finishMsg struct{}
 
 type resultMsg interface {
-	String() string
+	Path() string
 	Err() error
+	String() string
 }
 
 type exifResultMsg struct {
@@ -31,6 +32,8 @@ type cleanResultMsg struct {
 	empty  bool
 	err    error
 }
+
+func (r cleanResultMsg) Path() string { return r.dir }
 
 func (r cleanResultMsg) Err() error { return r.err }
 
@@ -57,6 +60,8 @@ func (r cleanResultMsg) String() string {
 	}
 }
 
+func (r renameResultMsg) Path() string { return r.photo.Path }
+
 func (r renameResultMsg) Err() error { return r.err }
 
 func (r renameResultMsg) String() string {
@@ -79,6 +84,8 @@ func (r renameResultMsg) String() string {
 		okStyle.Render("OK"),
 		renamedPath)
 }
+
+func (r exifResultMsg) Path() string { return r.photo.Path }
 
 func (r exifResultMsg) Err() error { return r.err }
 

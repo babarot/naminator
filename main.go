@@ -245,48 +245,54 @@ type Photo struct {
 }
 
 func getExifdata(path string) (Photo, error) {
+	base := filepath.Base(path)
+
+	photo := Photo{
+		Name: base,
+		Path: path,
+	}
 	et, err := exiftool.NewExiftool()
 	if err != nil {
-		return Photo{}, fmt.Errorf("failed to run exiftool: %w", err)
+		return photo, fmt.Errorf("failed to run exiftool: %w", err)
 	}
 	defer et.Close()
 
-	base := filepath.Base(path)
 	fileInfos := et.ExtractMetadata(path)
 	if len(fileInfos) == 0 {
-		return Photo{Name: base}, errors.New("failed to extract metadata")
+		return photo, errors.New("failed to extract metadata")
 	}
 	// ExtractMetadata can deal with multiple files at once but this function only uses one argument
 	// so it's enough to reference the first element in fileInfos.
 	fileInfo := fileInfos[0]
 
 	if fileInfo.Err != nil {
-		return Photo{Name: base}, fmt.Errorf("file info error: %w", err)
+		return photo, fmt.Errorf("file info error: %w", err)
 	}
 
 	filename, err := fileInfo.GetString("FileName")
+	photo.Name = filename
 	if err != nil {
-		return Photo{Name: filename}, fmt.Errorf("error on 'FileName': %w", err)
+		return photo, fmt.Errorf("error on 'FileName': %w", err)
 	}
 
 	dateTime, err := fileInfo.GetString("SubSecDateTimeOriginal") // Use it instead of DateTimeOriginal
 	if err != nil {
-		return Photo{Name: filename}, fmt.Errorf("error on 'SubSecDateTimeOriginal': %w", err)
+		return photo, fmt.Errorf("error on 'SubSecDateTimeOriginal': %w", err)
 	}
 
 	sourceFile, err := fileInfo.GetString("SourceFile")
 	if err != nil {
-		return Photo{Name: filename}, fmt.Errorf("error on 'SourceFile': %w", err)
+		return photo, fmt.Errorf("error on 'SourceFile': %w", err)
 	}
 
 	ext, err := fileInfo.GetString("FileTypeExtension")
 	if err != nil {
-		return Photo{Name: filename}, fmt.Errorf("error on 'FileTypeExtension': %w", err)
+		return photo, fmt.Errorf("error on 'FileTypeExtension': %w", err)
 	}
 
 	createdAt, err := time.Parse("2006:01:02 15:04:05.000-07:00", dateTime)
 	if err != nil {
-		return Photo{Name: filename}, fmt.Errorf("failed to parse createdAt: %w", err)
+		return photo, fmt.Errorf("failed to parse createdAt: %w", err)
 	}
 
 	return Photo{

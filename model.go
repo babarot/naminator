@@ -26,9 +26,21 @@ type model struct {
 	results      []resultMsg
 	errorResults []resultMsg
 	startTime    time.Time
-	processed    int
+	files        map[string]state
 	total        int
 	height       int
+}
+
+type state uint8
+
+const (
+	succeeded state = iota
+	failed
+)
+
+type status struct {
+	succeeded int
+	failed    int
 }
 
 func newModel(total int) model {
@@ -49,7 +61,7 @@ func newModel(total int) model {
 		results:      make([]resultMsg, height),
 		errorResults: nil,
 		startTime:    time.Now(),
-		processed:    0,
+		files:        map[string]state{},
 		total:        total,
 		height:       height,
 	}
@@ -100,8 +112,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// This ensures the message list remains within the allowed height.
 			m.results = append(m.results[1:], msg)
 		}
-		if _, ok := msg.(exifResultMsg); ok {
-			m.processed++
+		switch v := msg.(type) {
+		case exifResultMsg, renameResultMsg:
+			if v.Err() != nil {
+				m.files[msg.Path()] = failed
+			} else {
+				m.files[msg.Path()] = succeeded
+			}
 		}
 		return m, nil
 	case spinner.TickMsg:
@@ -116,13 +133,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	var s string
 
-	if m.quitting {
-		s += "Renaming completed. Total elapsed time: " +
-			duration(time.Since(m.startTime)).String()
-	} else {
-		s += m.spinner.View() + " Processing photos..."
+	var successes, failures int
+	for _, state := range m.files {
+		switch state {
+		case succeeded:
+			successes++
+		case failed:
+			failures++
+		}
 	}
-	s += fmt.Sprintf(" (%d/%d)", m.processed, m.total)
+
+	if m.quitting {
+		s += "Renaming done. Time: " +
+			duration(time.Since(m.startTime)).String()
+		s += fmt.Sprintf(" (%d OK, %d failed, %d total)", successes, failures, m.total)
+		if failures > 0 {
+			s += "\n"
+			s += fmt.Sprintf("%d %s detected. See %s for more details.",
+				failures,
+				map[bool]string{true: "issue", false: "issues"}[failures == 1],
+				underStyle.Render("debug.log"))
+		}
+	} else {
+		s += m.spinner.View() + " Processing photos... "
+		s += fmt.Sprintf("(%d/%d)", successes+failures, m.total)
+	}
 
 	s += "\n\n"
 
@@ -139,7 +174,7 @@ func (m model) View() string {
 
 	s += "\n"
 
-	percent := float64(m.processed) / float64(m.total)
+	percent := float64(successes+failures) / float64(m.total)
 	if time.Since(m.startTime).Seconds() > 3.0 && !showProgressSet {
 		showProgress = percent < 0.25
 		showProgressSet = true
