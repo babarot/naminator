@@ -38,11 +38,6 @@ const (
 	failed
 )
 
-type status struct {
-	succeeded int
-	failed    int
-}
-
 func newModel(total int) model {
 	s := spinner.New(
 		spinner.WithSpinner(spinner.Line),
@@ -71,47 +66,73 @@ func (m model) Init() tea.Cmd {
 	return m.spinner.Tick
 }
 
+// replaceFirstNilOrAppend finds the first nil element in m.results and replaces it with msg.
+// If no nil element is found, it removes the oldest element and appends msg at the end.
+// This ensures that messages fit within the allocated space while keeping recent ones visible.
+func (m *model) replaceFirstNilOrAppend(msg resultMsg) {
+	found := false
+	for i, result := range m.results {
+		if result == nil {
+			m.results[i] = msg
+			found = true
+			break
+		}
+	}
+	// If no nil element was found, remove the oldest message and append the new one.
+	if !found {
+		m.results = append(m.results[1:], msg)
+	}
+}
+
+// trimNonErrorMessageAndAppend removes the first non-error message (or nil) from m.results
+// while ensuring error messages are retained. If all messages contain errors, it removes
+// the oldest one instead. This function maintains a balance between highlighting errors
+// and allowing new messages to be displayed.
+func (m *model) trimNonErrorMessageAndAppend(msg resultMsg) {
+	var newResults []resultMsg
+	met := false
+
+	// Iterate through m.results and remove the first non-error message (or nil).
+	for _, result := range m.results {
+		if !met && (result == nil || result.Err() == nil) {
+			// Skip the first encountered non-error message (or nil) to make space for new messages.
+			met = true
+			continue
+		}
+		newResults = append(newResults, result)
+	}
+
+	// Ensure the number of messages does not exceed the allowed height.
+	if len(newResults) >= m.height {
+		// If the list exceeds the allowed height, trim the oldest messages before appending the new one.
+		newResults = append(newResults[len(newResults)-m.height+1:], msg)
+	} else {
+		// Otherwise, simply append the new message.
+		newResults = append(newResults, msg)
+	}
+	m.results = newResults
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case finishMsg:
 		m.quitting = true
 		return m, tea.Quit
+
 	case resultMsg:
+		// If msg contains an error, add it to the errorResults list.
 		if msg.Err() != nil {
-			// If the message contains an error, add it to the errorResults slice.
 			m.errorResults = append(m.errorResults, msg)
 		}
+
+		// If any errors exist, prioritize retaining error messages while managing space.
 		if len(m.errorResults) > 0 {
-			// If there are any recorded errors, rebuild the results slice.
-			// The goal is to highlight error messages (retain them in the slice)
-			// while receiving other new messages.
-			var met bool
-			var results []resultMsg
-			for _, result := range m.results {
-				if (result == nil || result.Err() == nil) && !met {
-					// Skip the first non-error message encountered.
-					// This ensures that when an error occurs, a regular message is removed
-					// to make space while keeping error messages visible.
-					met = true
-				} else {
-					// Retain all other messages.
-					results = append(results, result)
-				}
-			}
-			if n := len(results); n >= m.height {
-				// If the number of messages exceeds the allowed height, trim the oldest ones.
-				// This prevents the list from growing indefinitely while keeping recent messages.
-				m.results = append(results[n-m.height+1:], msg)
-			} else {
-				// Otherwise, simply append the new message.
-				m.results = append(results, msg)
-			}
+			m.trimNonErrorMessageAndAppend(msg)
 		} else {
-			// If there are no errors, maintain a fixed-length message history.
-			// Remove the oldest message (first element) and append the new message.
-			// This ensures the message list remains within the allowed height.
-			m.results = append(m.results[1:], msg)
+			// Otherwise, maintain a fixed-length message history.
+			m.replaceFirstNilOrAppend(msg)
 		}
+
 		switch v := msg.(type) {
 		case exifResultMsg, renameResultMsg:
 			if v.Err() != nil {
@@ -121,10 +142,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
+
 	default:
 		return m, nil
 	}
@@ -147,13 +170,13 @@ func (m model) View() string {
 		s += "Renaming done. Time: " +
 			duration(time.Since(m.startTime)).String()
 		s += fmt.Sprintf(" (%d OK, %d failed, %d total)", successes, failures, m.total)
-		if failures > 0 {
-			s += "\n"
-			s += fmt.Sprintf("%d %s detected. See %s for more details.",
-				failures,
-				map[bool]string{true: "issue", false: "issues"}[failures == 1],
-				underStyle.Render("debug.log"))
-		}
+		// if failures > 0 {
+		// 	s += "\n"
+		// 	s += fmt.Sprintf("%d %s detected. See %s for more details.",
+		// 		failures,
+		// 		map[bool]string{true: "issue", false: "issues"}[failures == 1],
+		// 		underStyle.Render("debug.log"))
+		// }
 	} else {
 		s += m.spinner.View() + " Processing photos... "
 		s += fmt.Sprintf("(%d/%d)", successes+failures, m.total)
