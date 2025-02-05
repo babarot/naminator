@@ -28,13 +28,17 @@ var (
 )
 
 type Option struct {
-	DestDir     string `short:"d" long:"dest-dir" description:"The directory path where renamed photos will be moved" default:""`
-	Dryrun      bool   `short:"n" long:"dry-run" description:"Simulates the command's actions without executing them"`
-	GroupByDate bool   `short:"t" long:"group-by-date" description:"Create a directory for each date and organize photos accordingly"`
-	GroupByExt  bool   `short:"e" long:"group-by-ext" description:"Create a directory for each file extension and organize the photos accordingly"`
-	Debug       string `long:"debug" description:"View debug logs (omitted: \"all\")" optional-value:"all" optional:"yes" choice:"all" choice:"new"`
-	Clean       bool   `short:"c" long:"clean" description:"Remove empty directories after renaming"`
-	Version     bool   `short:"v" long:"version" description:"Show version"`
+	DestDir     string     `short:"d" long:"dest-dir" description:"The directory path where renamed photos will be moved" default:""`
+	Dryrun      bool       `short:"n" long:"dry-run" description:"Simulate the command's actions without executing them"`
+	GroupByDate bool       `short:"t" long:"group-by-date" description:"Create a directory for each date and organize photos accordingly"`
+	GroupByExt  bool       `short:"e" long:"group-by-ext" description:"Create a directory for each file extension and organize the photos accordingly"`
+	Clean       bool       `short:"c" long:"clean" description:"Remove empty directories after renaming"`
+	Meta        MetaOption `group:"Meta Options"`
+}
+
+type MetaOption struct {
+	Debug   string `long:"debug" description:"View debug logs (default: \"full\")" optional-value:"full" optional:"yes" choice:"full" choice:"live"`
+	Version bool   `short:"v" long:"version" description:"Show version"`
 }
 
 type CLI struct {
@@ -65,7 +69,7 @@ func runMain() error {
 		return err
 	}
 
-	if opt.Version {
+	if opt.Meta.Version {
 		fmt.Printf("%s %s (%s)\n", appName, version, revision)
 		return nil
 	}
@@ -76,7 +80,7 @@ func runMain() error {
 		if err != nil {
 			return err
 		}
-		dataDir = filepath.Join(homeDir, ".local/share")
+		dataDir = filepath.Join(homeDir, ".local", "share")
 	}
 	logPath := filepath.Join(dataDir, "naminator", "debug.log")
 
@@ -94,7 +98,7 @@ func runMain() error {
 	}
 	defer logFile.Close()
 
-	if opt.Debug != "" {
+	if debug := opt.Meta.Debug; debug != "" {
 		shouldFollow := isatty.IsTerminal(os.Stdout.Fd())
 		tailConfig := tail.Config{
 			ReOpen: shouldFollow,
@@ -102,15 +106,15 @@ func runMain() error {
 			Poll:   true,
 			Logger: tail.DiscardingLogger,
 		}
-		switch opt.Debug {
-		case "new":
+		switch debug {
+		case "live": // like, "follow", "stream", "new"
 			tailConfig.Location = &tail.SeekInfo{
 				Offset: 0,
 				Whence: io.SeekEnd,
 			}
-		case "all":
+		case "full": // like, "all", "initial"
 		default:
-			return fmt.Errorf("%s: not supported debug type", opt.Debug)
+			return fmt.Errorf("%s: not supported debug type", debug)
 		}
 		t, err := tail.TailFile(logPath, tailConfig)
 		for line := range t.Lines {
