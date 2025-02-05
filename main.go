@@ -114,19 +114,21 @@ func (c CLI) run() error {
 	var wg sync.WaitGroup
 
 	for _, image := range c.images {
-		imagePath := image
+		image := image
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			start := time.Now()
-			photo, err := analyzeExifdata(imagePath)
-			c.p.Send(analyzeResultMsg{
+			startTime := time.Now()
+			photo, err := getExifdata(image)
+			c.p.Send(exifResultMsg{
 				photo:    photo,
-				duration: duration(time.Since(start)),
+				duration: duration(time.Since(startTime)),
 				err:      err,
 			})
 			if err != nil {
-				c.logger.Error("failed to get exif, so skip to rename", "name", photo.Name, "err", err)
+				c.logger.Error("failed to get exif, so skip to rename", "err", err,
+					"name", photo.Name,
+					"path", photo.Path)
 				return
 			}
 			photo, dryrun, err := c.rename(photo)
@@ -136,10 +138,10 @@ func (c CLI) run() error {
 				c.p.Send(renameResultMsg{photo: photo, dryrun: false, err: err})
 			}
 			if err != nil {
-				c.logger.Error("failed to rename", "name", photo.Name,
+				c.logger.Error("failed to rename", "err", err,
+					"name", photo.Name,
 					"from", photo.Path,
-					"to", photo.RenamedPath,
-					"err", err)
+					"to", photo.RenamedPath)
 			} else {
 				c.logger.Debug("renamed",
 					"name", photo.Name,
@@ -184,8 +186,7 @@ func (c CLI) rename(photo Photo) (Photo, bool, error) {
 	}
 
 	if c.opt.GroupByExt {
-		ext := getExt(photo.Path)
-		dest = filepath.Join(dest, ext)
+		dest = filepath.Join(dest, photo.Extension)
 	}
 	newPath = filepath.Join(dest, fmt.Sprintf("%s.%s",
 		photo.CreatedAt.Format("2006-01-02_15-04-05"),
@@ -204,12 +205,20 @@ func (c CLI) clean(paths []string) {
 		return
 	}
 	for _, path := range paths {
-		empty, err := isEmptyDir(path)
+		base := filepath.Base(path)
+		fi, err := os.Stat(path)
 		if err != nil {
-			c.p.Send(cleanResultMsg{err: err})
+			c.p.Send(cleanResultMsg{dir: base, err: err})
 			continue
 		}
-		base := filepath.Base(path)
+		if !fi.IsDir() {
+			continue
+		}
+		empty, err := isEmptyDir(path)
+		if err != nil {
+			c.p.Send(cleanResultMsg{dir: base, err: fmt.Errorf("isEmptyDir: %w", err)})
+			continue
+		}
 		if c.opt.Dryrun {
 			c.p.Send(cleanResultMsg{dir: base, dryrun: true})
 			continue
@@ -235,7 +244,7 @@ type Photo struct {
 	CreatedAt   time.Time
 }
 
-func analyzeExifdata(path string) (Photo, error) {
+func getExifdata(path string) (Photo, error) {
 	et, err := exiftool.NewExiftool()
 	if err != nil {
 		return Photo{}, fmt.Errorf("failed to run exiftool: %w", err)
@@ -321,18 +330,6 @@ func getImages(dirs []string) ([]string, error) {
 		}
 	}
 	return images, nil
-}
-
-func getExt(file string) string {
-	ext := filepath.Ext(file)
-	switch ext {
-	case ".ARW":
-		return "raw"
-	case ".HIF":
-		return "heif"
-	default:
-		return strings.TrimPrefix(strings.ToLower(ext), ".") // remove dot
-	}
 }
 
 func isEmptyDir(name string) (bool, error) {

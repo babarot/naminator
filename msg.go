@@ -13,7 +13,7 @@ type resultMsg interface {
 	Err() error
 }
 
-type analyzeResultMsg struct {
+type exifResultMsg struct {
 	photo    Photo
 	duration duration
 	err      error
@@ -38,22 +38,22 @@ func (r cleanResultMsg) String() string {
 	if r.err != nil {
 		return fmt.Sprintf("%s: %s %v",
 			r.dir,
-			errorStyle.Render(fmt.Sprintf("%-7s", "FAILED")),
+			errorStyle.Render("FAILED"),
 			r.err.Error())
 	}
 	if r.dryrun {
 		return fmt.Sprintf("%s: %s Would remove if empty",
 			r.dir,
-			dryrunStyle.Render(fmt.Sprintf("%-7s", "DRY-RUN")))
+			dryrunStyle.Render("DRY-RUN"))
 	}
 	if r.empty {
 		return fmt.Sprintf("%s: %s Removed because empty",
 			r.dir,
-			okStyle.Render(fmt.Sprintf("%-7s", "OK")))
+			okStyle.Render("OK"))
 	} else {
 		return fmt.Sprintf("%s: %s Do not remove because NOT empty",
 			r.dir,
-			warnStyle.Render(fmt.Sprintf("%-7s", "SKIP")))
+			warnStyle.Render("SKIP"))
 	}
 }
 
@@ -63,7 +63,7 @@ func (r renameResultMsg) String() string {
 	if r.err != nil {
 		return fmt.Sprintf("%s: %s %v",
 			r.photo.Name,
-			errorStyle.Render(fmt.Sprintf("%-7s", "FAILED")),
+			errorStyle.Render("FAILED"),
 			r.err.Error())
 	}
 	renamedPath := strings.ReplaceAll(r.photo.RenamedPath, os.Getenv("HOME"), "~")
@@ -76,21 +76,21 @@ func (r renameResultMsg) String() string {
 	}
 	return fmt.Sprintf("%s: %s Renamed to %s",
 		r.photo.Name,
-		okStyle.Render(fmt.Sprintf("%-7s", "OK")),
+		okStyle.Render("OK"),
 		renamedPath)
 }
 
-func (r analyzeResultMsg) Err() error { return r.err }
+func (r exifResultMsg) Err() error { return r.err }
 
-func (r analyzeResultMsg) String() string {
+func (r exifResultMsg) String() string {
 	if r.err != nil {
 		return fmt.Sprintf("%s: %s %v",
 			r.photo.Name,
-			errorStyle.Render(fmt.Sprintf("%-7s", "FAILED")),
+			errorStyle.Render("FAILED"),
 			r.err.Error())
 	}
 	return fmt.Sprintf("%s: %s Got exif data %s",
 		r.photo.Name,
-		okStyle.Render(fmt.Sprintf("%-7s", "OK")),
+		okStyle.Render("OK"),
 		durationStyle.Render(r.duration.String()))
 }

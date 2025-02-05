@@ -100,7 +100,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// This ensures the message list remains within the allowed height.
 			m.results = append(m.results[1:], msg)
 		}
-		if _, ok := msg.(analyzeResultMsg); ok {
+		if _, ok := msg.(exifResultMsg); ok {
 			m.processed++
 		}
 		return m, nil
@@ -128,7 +128,7 @@ func (m model) View() string {
 
 	for _, res := range m.results {
 		switch res.(type) {
-		case analyzeResultMsg, renameResultMsg, cleanResultMsg:
+		case exifResultMsg, renameResultMsg, cleanResultMsg:
 			s += res.String()
 		default:
 			// default is resultMsg (interface)
