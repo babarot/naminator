@@ -16,6 +16,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/jessevdk/go-flags"
+	"github.com/mattn/go-isatty"
+	"github.com/nxadm/tail"
 )
 
 const appName = "naminator"
@@ -30,6 +32,7 @@ type Option struct {
 	Dryrun      bool   `short:"n" long:"dry-run" description:"Simulates the command's actions without executing them"`
 	GroupByDate bool   `short:"t" long:"group-by-date" description:"Create a directory for each date and organize photos accordingly"`
 	GroupByExt  bool   `short:"e" long:"group-by-ext" description:"Create a directory for each file extension and organize the photos accordingly"`
+	Debug       string `long:"debug" description:"View debug logs (omitted: \"all\")" optional-value:"all" optional:"yes" choice:"all" choice:"new"`
 	Clean       bool   `short:"c" long:"clean" description:"Remove empty directories after renaming"`
 	Version     bool   `short:"v" long:"version" description:"Show version"`
 }
@@ -67,6 +70,55 @@ func runMain() error {
 		return nil
 	}
 
+	dataDir := os.Getenv("XDG_DATA_HOME")
+	if dataDir == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		dataDir = filepath.Join(homeDir, ".local/share")
+	}
+	logPath := filepath.Join(dataDir, "naminator", "debug.log")
+
+	logDir := filepath.Dir(logPath)
+	if _, err := os.Stat(logDir); os.IsNotExist(err) {
+		err := os.MkdirAll(logDir, 0755)
+		if err != nil {
+			return err
+		}
+	}
+
+	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer logFile.Close()
+
+	if opt.Debug != "" {
+		shouldFollow := isatty.IsTerminal(os.Stdout.Fd())
+		tailConfig := tail.Config{
+			ReOpen: shouldFollow,
+			Follow: shouldFollow,
+			Poll:   true,
+			Logger: tail.DiscardingLogger,
+		}
+		switch opt.Debug {
+		case "new":
+			tailConfig.Location = &tail.SeekInfo{
+				Offset: 0,
+				Whence: io.SeekEnd,
+			}
+		case "all":
+		default:
+			return fmt.Errorf("%s: not supported debug type", opt.Debug)
+		}
+		t, err := tail.TailFile(logPath, tailConfig)
+		for line := range t.Lines {
+			fmt.Println(line.Text)
+		}
+		return err
+	}
+
 	if len(args) == 0 {
 		return fmt.Errorf("too few arguments")
 	}
@@ -79,12 +131,6 @@ func runMain() error {
 	if len(images) == 0 {
 		return errors.New("no images given")
 	}
-
-	logFile, err := os.OpenFile("debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer logFile.Close()
 
 	cli := CLI{
 		args: args,
