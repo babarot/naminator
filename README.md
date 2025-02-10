@@ -19,13 +19,19 @@ brew install exiftool
 
 ## Installation
 
-Go:
+Using `brew`
+
+```console
+brew install babarot/tap/naminator
+```
+
+Using `go`
 
 ```console
 go install github.com/babarot/naminator@latest
 ```
 
-Using [afx](https://github.com/babarot/afx):
+Using [`afx`](https://github.com/babarot/afx)
 
 ```yaml
 github:
