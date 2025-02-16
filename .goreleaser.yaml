@@ -56,3 +56,12 @@ brews:
     homepage: https://github.com/babarot/naminator
     description: Bulk-rename w/ EXIF metadata
     license: MIT
+
+scoops:
+  - repository:
+      owner: babarot
+      name: scoop-bucket
+      token: "{{ .Env.SCOOP_GITHUB_TOKEN }}"
+    homepage: https://github.com/babarot/naminator
+    description: Bulk-rename w/ EXIF metadata
+    license: MIT
