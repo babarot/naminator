@@ -41,7 +41,7 @@ github:
   repo: naminator
   release:
     name: naminator
-    tag: v0.2.2
+    tag: v0.2.3
   command:
     link:
     - from: naminator

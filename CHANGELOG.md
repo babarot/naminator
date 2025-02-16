@@ -1,5 +1,7 @@
 # Changelog
 
+## [v0.2.3](https://github.com/babarot/naminator/compare/v0.2.2...v0.2.3) - 2025-02-16
+
 ## [v0.2.2](https://github.com/babarot/naminator/compare/v0.2.1...v0.2.2) - 2025-02-16
 
 ## [v0.2.1](https://github.com/babarot/naminator/compare/v0.2.0...v0.2.1) - 2025-02-10
