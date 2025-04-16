@@ -53,7 +53,6 @@ afx install
 
 ## Usage
 
-
 ```console
 $ naminator --help
 Usage:
@@ -64,6 +63,7 @@ Application Options:
   -n, --dry-run           Simulate the command's actions without executing them
   -t, --group-by-date     Create a directory for each date and organize photos accordingly
   -e, --group-by-ext      Create a directory for each file extension and organize the photos accordingly
+  -E, --group-ext-first   Prioritize grouping by extension over date (requires -e and -t)
   -c, --clean             Remove empty directories after renaming
 
 Meta Options:
@@ -72,7 +72,6 @@ Meta Options:
 
 Help Options:
   -h, --help              Show this help message
-
 ```
 
 Pass directories containing images as arguments, and rename the images based on their EXIF data. The renaming will occur within the same directories.
@@ -388,6 +387,86 @@ naminator --dest-dir=myPhotos --group-by-date --group-by-ext --clean ./10050111 
 </tr>
 </tbody>
 </table>
+
+## 5. Extension-First Grouping: `-E`, `--group-ext-first`
+
+```console
+naminator --dest-dir=myPhotos --group-by-date --group-by-ext --group-ext-first ./10050111 ./10150112
+```
+
+or with short options:
+
+```console
+naminator -tecE ./10050111 ./10150112
+```
+
+<table>
+<thead>
+<tr>
+<th>Before</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+
+```
+├── 10050111
+│   ├── A7C00138.ARW
+│   ├── A7C00138.HIF
+│   ├── A7C00139.ARW
+│   ├── A7C00139.HIF
+│   ├── A7C00140.ARW
+│   ├── A7C00140.HIF
+│   ├── A7C00141.ARW
+│   └── A7C00141.HIF
+└── 10150112
+    ├── A7C00221.ARW
+    ├── A7C00221.HIF
+    ├── A7C00222.ARW
+    ├── A7C00222.HIF
+    └── A7C00223.ARW
+```
+
+</td>
+<td>
+
+```
+├── 10050111
+├── 10150112
+└── myPhotos
+    ├── arw
+    │   ├── 2025-01-11
+    │   │   ├── 2025-01-11_11-12-43.arw
+    │   │   ├── 2025-01-11_11-15-50.arw
+    │   │   ├── 2025-01-11_11-15-52.arw
+    │   │   └── 2025-01-11_11-16-06.arw
+    │   └── 2025-01-12
+    │       ├── 2025-01-12_13-04-00.arw
+    │       ├── 2025-01-12_13-04-06.arw
+    │       └── 2025-01-12_13-13-56.arw
+    └── heif
+        ├── 2025-01-11
+        │   ├── 2025-01-11_11-12-43.heif
+        │   ├── 2025-01-11_11-15-50.heif
+        │   ├── 2025-01-11_11-15-52.heif
+        │   └── 2025-01-11_11-16-06.heif
+        └── 2025-01-12
+            ├── 2025-01-12_13-04-00.heif
+            └── 2025-01-12_13-04-06.heif
+```
+
+</td>
+</tr>
+</tbody>
+</table>
+
+When using both `--group-by-date` and `--group-by-ext` options, files are organized by date first, then by extension by default. The `--group-ext-first` option reverses this hierarchy, organizing files by extension first, then by date.
+
+This option is especially useful when you prioritize file type organization over chronological organization. For example, when you work with different file formats separately (editing RAW files first, then reviewing JPEG/HEIF versions).
+
+**Note**: The `--group-ext-first` option requires both `--group-by-date` and `--group-by-ext` to be specified.
 
 ## Debugging
 

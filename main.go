@@ -27,13 +27,15 @@ var (
 	revision = "HEAD"
 )
 
+// Option struct with the new GroupExtFirst flag
 type Option struct {
-	DestDir     string     `short:"d" long:"dest-dir" description:"The directory path where renamed photos will be moved" default:""`
-	Dryrun      bool       `short:"n" long:"dry-run" description:"Simulate the command's actions without executing them"`
-	GroupByDate bool       `short:"t" long:"group-by-date" description:"Create a directory for each date and organize photos accordingly"`
-	GroupByExt  bool       `short:"e" long:"group-by-ext" description:"Create a directory for each file extension and organize the photos accordingly"`
-	Clean       bool       `short:"c" long:"clean" description:"Remove empty directories after renaming"`
-	Meta        MetaOption `group:"Meta Options"`
+	DestDir       string     `short:"d" long:"dest-dir" description:"The directory path where renamed photos will be moved" default:""`
+	Dryrun        bool       `short:"n" long:"dry-run" description:"Simulate the command's actions without executing them"`
+	GroupByDate   bool       `short:"t" long:"group-by-date" description:"Create a directory for each date and organize photos accordingly"`
+	GroupByExt    bool       `short:"e" long:"group-by-ext" description:"Create a directory for each file extension and organize the photos accordingly"`
+	GroupExtFirst bool       `short:"E" long:"group-ext-first" description:"Prioritize grouping by extension over date (requires -e and -t)"`
+	Clean         bool       `short:"c" long:"clean" description:"Remove empty directories after renaming"`
+	Meta          MetaOption `group:"Meta Options"`
 }
 
 type MetaOption struct {
@@ -121,6 +123,11 @@ func runMain() error {
 			fmt.Println(line.Text)
 		}
 		return err
+	}
+
+	// Validate the GroupExtFirst flag - it requires both GroupByDate and GroupByExt
+	if opt.GroupExtFirst && !(opt.GroupByDate && opt.GroupByExt) {
+		return fmt.Errorf("--group-ext-first requires both --group-by-date and --group-by-ext")
 	}
 
 	if len(args) == 0 {
@@ -220,24 +227,35 @@ func (c CLI) run() error {
 	return nil
 }
 
+// Modified rename function for supporting extension-first grouping
 func (c CLI) rename(photo Photo) (Photo, bool, error) {
 	var newPath string
 	dest := c.opt.DestDir
 	if dest == "" {
 		dest = photo.Dir
-		// get the parent directory of the current directory to create a new parent directory
+		// Get the parent directory of the current directory to create a new parent directory
 		if c.opt.GroupByDate || c.opt.GroupByExt {
 			dest = filepath.Dir(dest)
 		}
 	}
-	if c.opt.GroupByDate {
-		dt := photo.CreatedAt.Format("2006-01-02")
-		dest = filepath.Join(dest, dt)
-	}
 
-	if c.opt.GroupByExt {
+	// Change the order of directory path construction based on grouping options
+	if c.opt.GroupByExt && c.opt.GroupByDate {
+		if c.opt.GroupExtFirst {
+			// Extension > Date order (new functionality)
+			dest = filepath.Join(dest, photo.Extension)
+			dest = filepath.Join(dest, photo.CreatedAt.Format("2006-01-02"))
+		} else {
+			// Date > Extension order (existing functionality)
+			dest = filepath.Join(dest, photo.CreatedAt.Format("2006-01-02"))
+			dest = filepath.Join(dest, photo.Extension)
+		}
+	} else if c.opt.GroupByDate {
+		dest = filepath.Join(dest, photo.CreatedAt.Format("2006-01-02"))
+	} else if c.opt.GroupByExt {
 		dest = filepath.Join(dest, photo.Extension)
 	}
+
 	newPath = filepath.Join(dest, fmt.Sprintf("%s.%s",
 		photo.CreatedAt.Format("2006-01-02_15-04-05"),
 		photo.Extension,
