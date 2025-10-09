@@ -276,7 +276,7 @@ func (c CLI) clean(paths []string) {
 		base := filepath.Base(path)
 		fi, err := os.Stat(path)
 		if err != nil {
-			c.p.Send(cleanResultMsg{dir: base, err: err})
+			// Skip silently if path doesn't exist (e.g., renamed individual files)
 			continue
 		}
 		if !fi.IsDir() {
@@ -343,10 +343,33 @@ func getExifdata(path string) (Photo, error) {
 		return photo, fmt.Errorf("error on 'FileName': %w", err)
 	}
 
-	dateTime, err := fileInfo.GetString("SubSecDateTimeOriginal") // Use it instead of DateTimeOriginal
-	if err != nil {
-		return photo, fmt.Errorf("error on 'SubSecDateTimeOriginal': %w", err)
+	// Try SubSecDateTimeOriginal first, fallback to DateTimeOriginal if not available
+	var createdAt time.Time
+	jst := time.FixedZone("JST", 9*60*60)
+
+	dateTime, err := fileInfo.GetString("SubSecDateTimeOriginal")
+	if err == nil {
+		// SubSecDateTimeOriginal is available (includes timezone info)
+		createdAt, err = time.Parse("2006:01:02 15:04:05.000-07:00", dateTime)
+		if err != nil {
+			return photo, fmt.Errorf("failed to parse SubSecDateTimeOriginal: %w", err)
+		}
+	} else {
+		// Fallback to DateTimeOriginal (no timezone info, treat as JST)
+		dateTime, err = fileInfo.GetString("DateTimeOriginal")
+		if err != nil {
+			return photo, fmt.Errorf("error on both SubSecDateTimeOriginal and DateTimeOriginal: %w", err)
+		}
+
+		// Parse without timezone and treat as JST
+		createdAt, err = time.ParseInLocation("2006:01:02 15:04:05", dateTime, jst)
+		if err != nil {
+			return photo, fmt.Errorf("failed to parse DateTimeOriginal: %w", err)
+		}
 	}
+
+	// Convert to JST if not already
+	createdAt = createdAt.In(jst)
 
 	sourceFile, err := fileInfo.GetString("SourceFile")
 	if err != nil {
@@ -356,11 +379,6 @@ func getExifdata(path string) (Photo, error) {
 	ext, err := fileInfo.GetString("FileTypeExtension")
 	if err != nil {
 		return photo, fmt.Errorf("error on 'FileTypeExtension': %w", err)
-	}
-
-	createdAt, err := time.Parse("2006:01:02 15:04:05.000-07:00", dateTime)
-	if err != nil {
-		return photo, fmt.Errorf("failed to parse createdAt: %w", err)
 	}
 
 	return Photo{
