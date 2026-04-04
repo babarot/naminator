@@ -43,12 +43,48 @@ type MetaOption struct {
 	Version bool   `short:"v" long:"version" description:"Show version"`
 }
 
+// Sender abstracts message sending to the UI.
+type Sender interface {
+	Send(msg tea.Msg)
+}
+
+// ExifExtractor extracts EXIF metadata from a file.
+type ExifExtractor interface {
+	Extract(path string) (Photo, error)
+}
+
+// FileSystem abstracts file system operations for testability.
+type FileSystem interface {
+	Rename(oldpath, newpath string) error
+	MkdirAll(path string, perm os.FileMode) error
+	RemoveAll(path string) error
+	Stat(name string) (os.FileInfo, error)
+}
+
+// osFS is the real filesystem implementation.
+type osFS struct{}
+
+func (osFS) Rename(oldpath, newpath string) error          { return os.Rename(oldpath, newpath) }
+func (osFS) MkdirAll(path string, perm os.FileMode) error  { return os.MkdirAll(path, perm) }
+func (osFS) RemoveAll(path string) error                   { return os.RemoveAll(path) }
+func (osFS) Stat(name string) (os.FileInfo, error)         { return os.Stat(name) }
+
+// exiftoolExtractor is the real ExifExtractor using go-exiftool.
+type exiftoolExtractor struct{}
+
+func (exiftoolExtractor) Extract(path string) (Photo, error) {
+	return getExifdata(path)
+}
+
 type CLI struct {
 	args   []string
 	opt    Option
 	logger *slog.Logger
 	p      *tea.Program
+	sender Sender
 	images []string
+	exif   ExifExtractor
+	fs     FileSystem
 }
 
 func main() {
@@ -143,6 +179,7 @@ func runMain() error {
 		return errors.New("no images given")
 	}
 
+	p := tea.NewProgram(newModel(len(images)))
 	cli := CLI{
 		args: args,
 		opt:  opt,
@@ -150,8 +187,11 @@ func runMain() error {
 			logFile,
 			&slog.HandlerOptions{Level: slog.LevelDebug}),
 		),
-		p:      tea.NewProgram(newModel(len(images))),
+		p:      p,
+		sender: p,
 		images: images,
+		exif:   exiftoolExtractor{},
+		fs:     osFS{},
 	}
 
 	return cli.run()
@@ -176,8 +216,8 @@ func (c CLI) run() error {
 		go func() {
 			defer wg.Done()
 			startTime := time.Now()
-			photo, err := getExifdata(image)
-			c.p.Send(exifResultMsg{
+			photo, err := c.exif.Extract(image)
+			c.sender.Send(exifResultMsg{
 				photo:    photo,
 				duration: duration(time.Since(startTime)),
 				err:      err,
@@ -190,9 +230,9 @@ func (c CLI) run() error {
 			}
 			photo, dryrun, err := c.rename(photo)
 			if dryrun {
-				c.p.Send(renameResultMsg{photo: photo, dryrun: true})
+				c.sender.Send(renameResultMsg{photo: photo, dryrun: true})
 			} else {
-				c.p.Send(renameResultMsg{photo: photo, dryrun: false, err: err})
+				c.sender.Send(renameResultMsg{photo: photo, dryrun: false, err: err})
 			}
 			if err != nil {
 				c.logger.Error("failed to rename", "err", err,
@@ -214,7 +254,7 @@ func (c CLI) run() error {
 		// Remove empty directories after processing is done
 		c.clean(c.args)
 		// Signal completion to stop UI rendering
-		c.p.Send(finishMsg{})
+		c.sender.Send(finishMsg{})
 	}()
 
 	// No need to wait for the goroutine explicitly, as c.p.Run() blocks
@@ -227,45 +267,44 @@ func (c CLI) run() error {
 	return nil
 }
 
-// Modified rename function for supporting extension-first grouping
-func (c CLI) rename(photo Photo) (Photo, bool, error) {
-	var newPath string
-	dest := c.opt.DestDir
+// buildNewPath computes the destination path for a photo based on options.
+// This is a pure function with no side effects.
+func buildNewPath(photo Photo, opt Option) string {
+	dest := opt.DestDir
 	if dest == "" {
 		dest = photo.Dir
-		// Get the parent directory of the current directory to create a new parent directory
-		if c.opt.GroupByDate || c.opt.GroupByExt {
+		if opt.GroupByDate || opt.GroupByExt {
 			dest = filepath.Dir(dest)
 		}
 	}
 
-	// Change the order of directory path construction based on grouping options
-	if c.opt.GroupByExt && c.opt.GroupByDate {
-		if c.opt.GroupExtFirst {
-			// Extension > Date order (new functionality)
+	if opt.GroupByExt && opt.GroupByDate {
+		if opt.GroupExtFirst {
 			dest = filepath.Join(dest, photo.Extension)
 			dest = filepath.Join(dest, photo.CreatedAt.Format("2006-01-02"))
 		} else {
-			// Date > Extension order (existing functionality)
 			dest = filepath.Join(dest, photo.CreatedAt.Format("2006-01-02"))
 			dest = filepath.Join(dest, photo.Extension)
 		}
-	} else if c.opt.GroupByDate {
+	} else if opt.GroupByDate {
 		dest = filepath.Join(dest, photo.CreatedAt.Format("2006-01-02"))
-	} else if c.opt.GroupByExt {
+	} else if opt.GroupByExt {
 		dest = filepath.Join(dest, photo.Extension)
 	}
 
-	newPath = filepath.Join(dest, fmt.Sprintf("%s.%s",
+	return filepath.Join(dest, fmt.Sprintf("%s.%s",
 		photo.CreatedAt.Format("2006-01-02_15-04-05"),
 		photo.Extension,
 	))
-	photo.RenamedPath = newPath
+}
+
+func (c CLI) rename(photo Photo) (Photo, bool, error) {
+	photo.RenamedPath = buildNewPath(photo, c.opt)
 	if c.opt.Dryrun {
 		return photo, true, nil
 	}
-	_ = os.MkdirAll(dest, 0755)
-	return photo, false, os.Rename(photo.Path, newPath)
+	_ = c.fs.MkdirAll(filepath.Dir(photo.RenamedPath), 0755)
+	return photo, false, c.fs.Rename(photo.Path, photo.RenamedPath)
 }
 
 func (c CLI) clean(paths []string) {
@@ -274,7 +313,7 @@ func (c CLI) clean(paths []string) {
 	}
 	for _, path := range paths {
 		base := filepath.Base(path)
-		fi, err := os.Stat(path)
+		fi, err := c.fs.Stat(path)
 		if err != nil {
 			// Skip silently if path doesn't exist (e.g., renamed individual files)
 			continue
@@ -284,21 +323,21 @@ func (c CLI) clean(paths []string) {
 		}
 		empty, err := isEmptyDir(path)
 		if err != nil {
-			c.p.Send(cleanResultMsg{dir: base, err: fmt.Errorf("isEmptyDir: %w", err)})
+			c.sender.Send(cleanResultMsg{dir: base, err: fmt.Errorf("isEmptyDir: %w", err)})
 			continue
 		}
 		if c.opt.Dryrun {
-			c.p.Send(cleanResultMsg{dir: base, dryrun: true})
+			c.sender.Send(cleanResultMsg{dir: base, dryrun: true})
 			continue
 		}
 		if !empty {
-			c.p.Send(cleanResultMsg{dir: base, empty: false})
+			c.sender.Send(cleanResultMsg{dir: base, empty: false})
 			continue
 		}
-		if err := os.RemoveAll(path); err != nil {
-			c.p.Send(cleanResultMsg{dir: base, empty: true, err: err})
+		if err := c.fs.RemoveAll(path); err != nil {
+			c.sender.Send(cleanResultMsg{dir: base, empty: true, err: err})
 		} else {
-			c.p.Send(cleanResultMsg{dir: base, empty: true})
+			c.sender.Send(cleanResultMsg{dir: base, empty: true})
 		}
 	}
 }

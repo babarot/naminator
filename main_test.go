@@ -1,0 +1,530 @@
+package main
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+func TestDurationString(t *testing.T) {
+	tests := []struct {
+		name string
+		d    duration
+		want string
+	}{
+		{"zero", duration(0), "0.00s"},
+		{"one second", duration(time.Second), "1.00s"},
+		{"half second", duration(500 * time.Millisecond), "0.50s"},
+		{"2.5 seconds", duration(2500 * time.Millisecond), "2.50s"},
+		{"sub-millisecond", duration(100 * time.Microsecond), "0.00s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.d.String()
+			if got != tt.want {
+				t.Errorf("duration(%v).String() = %q, want %q", time.Duration(tt.d), got, tt.want)
+			}
+		})
+	}
+}
+
+// --- Mocks ---
+
+// mockFS records filesystem calls and can simulate errors.
+type mockFS struct {
+	renamed    map[string]string
+	dirs       []string
+	removed    []string
+	renameErr  error
+	removeErr  error
+	statFunc   func(string) (os.FileInfo, error)
+}
+
+func newMockFS() *mockFS {
+	return &mockFS{renamed: make(map[string]string)}
+}
+
+func (m *mockFS) Rename(oldpath, newpath string) error {
+	if m.renameErr != nil {
+		return m.renameErr
+	}
+	m.renamed[oldpath] = newpath
+	return nil
+}
+
+func (m *mockFS) MkdirAll(path string, perm os.FileMode) error {
+	m.dirs = append(m.dirs, path)
+	return nil
+}
+
+func (m *mockFS) RemoveAll(path string) error {
+	if m.removeErr != nil {
+		return m.removeErr
+	}
+	m.removed = append(m.removed, path)
+	return nil
+}
+
+func (m *mockFS) Stat(name string) (os.FileInfo, error) {
+	if m.statFunc != nil {
+		return m.statFunc(name)
+	}
+	return os.Stat(name)
+}
+
+// mockExif returns predefined Photo data.
+type mockExif struct {
+	photos map[string]Photo
+	err    error
+}
+
+func (m *mockExif) Extract(path string) (Photo, error) {
+	if m.err != nil {
+		return Photo{Name: filepath.Base(path), Path: path}, m.err
+	}
+	if p, ok := m.photos[path]; ok {
+		return p, nil
+	}
+	return Photo{Name: filepath.Base(path), Path: path}, errors.New("no exif data")
+}
+
+// mockSender collects all sent messages for assertions.
+type mockSender struct {
+	mu   sync.Mutex
+	msgs []tea.Msg
+}
+
+func (m *mockSender) Send(msg tea.Msg) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.msgs = append(m.msgs, msg)
+}
+
+func (m *mockSender) getMessages() []tea.Msg {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]tea.Msg, len(m.msgs))
+	copy(cp, m.msgs)
+	return cp
+}
+
+// --- buildNewPath tests (pure function, no mocks needed) ---
+
+func TestBuildNewPath(t *testing.T) {
+	jst := time.FixedZone("JST", 9*60*60)
+	createdAt := time.Date(2024, 3, 15, 14, 30, 45, 0, jst)
+
+	photo := Photo{
+		Name:      "test.jpg",
+		Path:      "/photos/raw/test.jpg",
+		Dir:       "/photos/raw",
+		Extension: "jpg",
+		CreatedAt: createdAt,
+	}
+
+	tests := []struct {
+		name string
+		opt  Option
+		want string
+	}{
+		{
+			name: "no grouping",
+			opt:  Option{},
+			want: "/photos/raw/2024-03-15_14-30-45.jpg",
+		},
+		{
+			name: "group by date",
+			opt:  Option{GroupByDate: true},
+			want: "/photos/2024-03-15/2024-03-15_14-30-45.jpg",
+		},
+		{
+			name: "group by ext",
+			opt:  Option{GroupByExt: true},
+			want: "/photos/jpg/2024-03-15_14-30-45.jpg",
+		},
+		{
+			name: "group by date and ext (date first)",
+			opt:  Option{GroupByDate: true, GroupByExt: true},
+			want: "/photos/2024-03-15/jpg/2024-03-15_14-30-45.jpg",
+		},
+		{
+			name: "group ext first",
+			opt:  Option{GroupByDate: true, GroupByExt: true, GroupExtFirst: true},
+			want: "/photos/jpg/2024-03-15/2024-03-15_14-30-45.jpg",
+		},
+		{
+			name: "with dest dir",
+			opt:  Option{DestDir: "/tmp/photos"},
+			want: "/tmp/photos/2024-03-15_14-30-45.jpg",
+		},
+		{
+			name: "dest dir with group by date",
+			opt:  Option{DestDir: "/tmp/photos", GroupByDate: true},
+			want: "/tmp/photos/2024-03-15/2024-03-15_14-30-45.jpg",
+		},
+		{
+			name: "dest dir with group by date and ext",
+			opt:  Option{DestDir: "/output", GroupByDate: true, GroupByExt: true},
+			want: "/output/2024-03-15/jpg/2024-03-15_14-30-45.jpg",
+		},
+		{
+			name: "dest dir with ext first",
+			opt:  Option{DestDir: "/output", GroupByDate: true, GroupByExt: true, GroupExtFirst: true},
+			want: "/output/jpg/2024-03-15/2024-03-15_14-30-45.jpg",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildNewPath(photo, tt.opt)
+			if got != tt.want {
+				t.Errorf("buildNewPath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildNewPathDifferentExtensions(t *testing.T) {
+	jst := time.FixedZone("JST", 9*60*60)
+
+	for _, ext := range []string{"jpg", "png", "heic", "arw", "cr2"} {
+		t.Run(ext, func(t *testing.T) {
+			photo := Photo{
+				Dir:       "/photos/raw",
+				Extension: ext,
+				CreatedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, jst),
+			}
+			got := buildNewPath(photo, Option{GroupByExt: true})
+			want := "/photos/" + ext + "/2024-01-01_00-00-00." + ext
+			if got != want {
+				t.Errorf("got %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// --- rename tests (with mockFS) ---
+
+func TestRenameWithMockFS(t *testing.T) {
+	jst := time.FixedZone("JST", 9*60*60)
+	createdAt := time.Date(2024, 3, 15, 14, 30, 45, 0, jst)
+
+	photo := Photo{
+		Name:      "test.jpg",
+		Path:      "/photos/raw/test.jpg",
+		Dir:       "/photos/raw",
+		Extension: "jpg",
+		CreatedAt: createdAt,
+	}
+
+	t.Run("normal rename calls MkdirAll then Rename", func(t *testing.T) {
+		fs := newMockFS()
+		cli := CLI{opt: Option{}, fs: fs}
+		got, dryrun, err := cli.rename(photo)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if dryrun {
+			t.Error("expected dryrun=false")
+		}
+		if got.RenamedPath != "/photos/raw/2024-03-15_14-30-45.jpg" {
+			t.Errorf("RenamedPath = %q", got.RenamedPath)
+		}
+		if fs.renamed[photo.Path] != got.RenamedPath {
+			t.Error("fs.Rename was not called correctly")
+		}
+		if len(fs.dirs) != 1 {
+			t.Errorf("MkdirAll called %d times, want 1", len(fs.dirs))
+		}
+	})
+
+	t.Run("dryrun skips all fs operations", func(t *testing.T) {
+		fs := newMockFS()
+		cli := CLI{opt: Option{Dryrun: true}, fs: fs}
+		got, dryrun, err := cli.rename(photo)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !dryrun {
+			t.Error("expected dryrun=true")
+		}
+		// Path should still be computed
+		if got.RenamedPath == "" {
+			t.Error("RenamedPath should be set even in dryrun")
+		}
+		if len(fs.renamed) != 0 {
+			t.Error("fs.Rename should not be called in dryrun")
+		}
+		if len(fs.dirs) != 0 {
+			t.Error("fs.MkdirAll should not be called in dryrun")
+		}
+	})
+
+	t.Run("rename error propagates", func(t *testing.T) {
+		fs := newMockFS()
+		fs.renameErr = errors.New("permission denied")
+		cli := CLI{opt: Option{}, fs: fs}
+		_, _, err := cli.rename(photo)
+		if err == nil || err.Error() != "permission denied" {
+			t.Errorf("expected 'permission denied', got %v", err)
+		}
+	})
+
+	t.Run("MkdirAll creates parent of RenamedPath", func(t *testing.T) {
+		fs := newMockFS()
+		cli := CLI{opt: Option{GroupByDate: true}, fs: fs}
+		got, _, _ := cli.rename(photo)
+		expectedDir := filepath.Dir(got.RenamedPath)
+		if len(fs.dirs) != 1 || fs.dirs[0] != expectedDir {
+			t.Errorf("MkdirAll dir = %v, want %q", fs.dirs, expectedDir)
+		}
+	})
+}
+
+// --- clean tests (with mockFS + mockSender) ---
+
+func TestClean(t *testing.T) {
+	t.Run("does nothing when Clean=false", func(t *testing.T) {
+		sender := &mockSender{}
+		cli := CLI{opt: Option{Clean: false}, sender: sender, fs: newMockFS()}
+		cli.clean([]string{"/some/dir"})
+
+		if len(sender.getMessages()) != 0 {
+			t.Error("should not send any messages when Clean=false")
+		}
+	})
+
+	t.Run("skips non-existent paths silently", func(t *testing.T) {
+		fs := newMockFS()
+		fs.statFunc = func(name string) (os.FileInfo, error) {
+			return nil, os.ErrNotExist
+		}
+		sender := &mockSender{}
+		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: fs}
+		cli.clean([]string{"/nonexistent"})
+
+		if len(sender.getMessages()) != 0 {
+			t.Error("should silently skip non-existent paths")
+		}
+	})
+
+	t.Run("skips non-directory paths", func(t *testing.T) {
+		// Create a real temp file to get valid FileInfo for a file (not dir)
+		tmp := t.TempDir()
+		file := filepath.Join(tmp, "file.txt")
+		os.WriteFile(file, []byte("x"), 0644)
+
+		sender := &mockSender{}
+		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: osFS{}}
+		cli.clean([]string{file})
+
+		if len(sender.getMessages()) != 0 {
+			t.Error("should skip files (non-directories)")
+		}
+	})
+
+	t.Run("removes empty directory", func(t *testing.T) {
+		dir := t.TempDir()
+		emptyDir := filepath.Join(dir, "empty")
+		os.MkdirAll(emptyDir, 0755)
+
+		fs := newMockFS()
+		// Use real Stat so isEmptyDir works
+		fs.statFunc = func(name string) (os.FileInfo, error) { return os.Stat(name) }
+		sender := &mockSender{}
+		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: fs}
+		cli.clean([]string{emptyDir})
+
+		msgs := sender.getMessages()
+		if len(msgs) != 1 {
+			t.Fatalf("expected 1 message, got %d", len(msgs))
+		}
+		msg, ok := msgs[0].(cleanResultMsg)
+		if !ok {
+			t.Fatalf("expected cleanResultMsg, got %T", msgs[0])
+		}
+		if !msg.empty {
+			t.Error("expected empty=true")
+		}
+		if msg.err != nil {
+			t.Errorf("unexpected error: %v", msg.err)
+		}
+		if len(fs.removed) != 1 || fs.removed[0] != emptyDir {
+			t.Errorf("RemoveAll called with %v, want [%s]", fs.removed, emptyDir)
+		}
+	})
+
+	t.Run("does not remove non-empty directory", func(t *testing.T) {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, "file.txt"), []byte("x"), 0644)
+
+		fs := newMockFS()
+		fs.statFunc = func(name string) (os.FileInfo, error) { return os.Stat(name) }
+		sender := &mockSender{}
+		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: fs}
+		cli.clean([]string{dir})
+
+		msgs := sender.getMessages()
+		if len(msgs) != 1 {
+			t.Fatalf("expected 1 message, got %d", len(msgs))
+		}
+		msg := msgs[0].(cleanResultMsg)
+		if msg.empty {
+			t.Error("expected empty=false")
+		}
+		if len(fs.removed) != 0 {
+			t.Error("RemoveAll should not be called for non-empty dir")
+		}
+	})
+
+	t.Run("dryrun does not actually remove", func(t *testing.T) {
+		dir := t.TempDir()
+		emptyDir := filepath.Join(dir, "empty")
+		os.MkdirAll(emptyDir, 0755)
+
+		fs := newMockFS()
+		fs.statFunc = func(name string) (os.FileInfo, error) { return os.Stat(name) }
+		sender := &mockSender{}
+		cli := CLI{opt: Option{Clean: true, Dryrun: true}, sender: sender, fs: fs}
+		cli.clean([]string{emptyDir})
+
+		msgs := sender.getMessages()
+		if len(msgs) != 1 {
+			t.Fatalf("expected 1 message, got %d", len(msgs))
+		}
+		msg := msgs[0].(cleanResultMsg)
+		if !msg.dryrun {
+			t.Error("expected dryrun=true in message")
+		}
+		if len(fs.removed) != 0 {
+			t.Error("RemoveAll should not be called in dryrun")
+		}
+	})
+
+	t.Run("RemoveAll error is sent as message", func(t *testing.T) {
+		dir := t.TempDir()
+		emptyDir := filepath.Join(dir, "empty")
+		os.MkdirAll(emptyDir, 0755)
+
+		fs := newMockFS()
+		fs.statFunc = func(name string) (os.FileInfo, error) { return os.Stat(name) }
+		fs.removeErr = errors.New("rm failed")
+		sender := &mockSender{}
+		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: fs}
+		cli.clean([]string{emptyDir})
+
+		msgs := sender.getMessages()
+		if len(msgs) != 1 {
+			t.Fatalf("expected 1 message, got %d", len(msgs))
+		}
+		msg := msgs[0].(cleanResultMsg)
+		if msg.err == nil || msg.err.Error() != "rm failed" {
+			t.Errorf("expected 'rm failed' error, got %v", msg.err)
+		}
+	})
+
+	t.Run("processes multiple paths", func(t *testing.T) {
+		dir := t.TempDir()
+		empty1 := filepath.Join(dir, "a")
+		empty2 := filepath.Join(dir, "b")
+		os.MkdirAll(empty1, 0755)
+		os.MkdirAll(empty2, 0755)
+
+		fs := newMockFS()
+		fs.statFunc = func(name string) (os.FileInfo, error) { return os.Stat(name) }
+		sender := &mockSender{}
+		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: fs}
+		cli.clean([]string{empty1, empty2})
+
+		msgs := sender.getMessages()
+		if len(msgs) != 2 {
+			t.Fatalf("expected 2 messages, got %d", len(msgs))
+		}
+		if len(fs.removed) != 2 {
+			t.Errorf("RemoveAll called %d times, want 2", len(fs.removed))
+		}
+	})
+}
+
+// --- Filesystem utility tests ---
+
+func TestIsEmptyDir(t *testing.T) {
+	t.Run("empty dir", func(t *testing.T) {
+		dir := t.TempDir()
+		empty, err := isEmptyDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !empty {
+			t.Error("expected empty dir")
+		}
+	})
+
+	t.Run("non-empty dir", func(t *testing.T) {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, "file.txt"), []byte("x"), 0644)
+		empty, err := isEmptyDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if empty {
+			t.Error("expected non-empty dir")
+		}
+	})
+
+	t.Run("non-existent dir", func(t *testing.T) {
+		_, err := isEmptyDir("/nonexistent/path")
+		if err == nil {
+			t.Error("expected error for non-existent dir")
+		}
+	})
+}
+
+func TestWalkDir(t *testing.T) {
+	dir := t.TempDir()
+
+	subDir := filepath.Join(dir, "sub")
+	os.MkdirAll(subDir, 0755)
+	for _, name := range []string{"a.txt", "b.jpg"} {
+		os.WriteFile(filepath.Join(dir, name), []byte("x"), 0644)
+	}
+	os.WriteFile(filepath.Join(subDir, "c.png"), []byte("x"), 0644)
+
+	files, err := walkDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 3 {
+		t.Errorf("walkDir() returned %d files, want 3: %v", len(files), files)
+	}
+
+	for _, f := range files {
+		fi, _ := os.Stat(f)
+		if fi.IsDir() {
+			t.Errorf("walkDir() should not include directories, got %s", f)
+		}
+	}
+}
+
+func TestWalkDirEmpty(t *testing.T) {
+	dir := t.TempDir()
+	files, err := walkDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 0 {
+		t.Errorf("expected 0 files, got %d", len(files))
+	}
+}
+
+func TestWalkDirNonExistent(t *testing.T) {
+	_, err := walkDir("/nonexistent/path")
+	if err == nil {
+		t.Error("expected error for non-existent path")
+	}
+}
