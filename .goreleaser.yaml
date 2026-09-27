@@ -65,3 +65,13 @@ scoops:
     homepage: https://github.com/babarot/naminator
     description: Bulk-rename w/ EXIF metadata
     license: MIT
+
+nix:
+  - repository:
+      owner: babarot
+      name: nur-packages
+      token: "{{ .Env.NUR_GITHUB_TOKEN }}"
+    homepage: https://github.com/babarot/naminator
+    description: Bulk-rename w/ EXIF metadata
+    license: mit
+    main_program: naminator
