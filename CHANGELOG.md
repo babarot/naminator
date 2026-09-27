@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.2.5](https://github.com/babarot/naminator/compare/v0.2.4...v0.2.5) - 2026-09-27
+
+### New Features
+- Add Extension-First Grouping Feature by @babarot in https://github.com/babarot/naminator/pull/24
+- Improve EXIF Date Handling with Fallback and Timezone Support by @babarot in https://github.com/babarot/naminator/pull/25
+
 ## [v0.2.4](https://github.com/babarot/naminator/compare/v0.2.3...v0.2.4) - 2025-02-16
 
 ## [v0.2.3](https://github.com/babarot/naminator/compare/v0.2.2...v0.2.3) - 2025-02-16
