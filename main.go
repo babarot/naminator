@@ -438,7 +438,8 @@ type Photo struct {
 	RenamedPath string
 	Dir         string
 	Extension   string
-	CreatedAt   time.Time
+	// CreatedAt is the clock time where the photo was taken (see parseExifTime)
+	CreatedAt time.Time
 }
 
 func getExifdata(et *exiftool.Exiftool, path string) (Photo, error) {
@@ -469,18 +470,14 @@ func getExifdata(et *exiftool.Exiftool, path string) (Photo, error) {
 
 	// Try SubSecDateTimeOriginal first, fallback to DateTimeOriginal if it is
 	// missing or cannot be parsed
-	jst := time.FixedZone("JST", 9*60*60)
-	createdAt, err := getExifTime(fileInfo, "SubSecDateTimeOriginal", jst)
+	createdAt, err := getExifTime(fileInfo, "SubSecDateTimeOriginal")
 	if err != nil {
 		var fallbackErr error
-		createdAt, fallbackErr = getExifTime(fileInfo, "DateTimeOriginal", jst)
+		createdAt, fallbackErr = getExifTime(fileInfo, "DateTimeOriginal")
 		if fallbackErr != nil {
 			return photo, fmt.Errorf("error on both SubSecDateTimeOriginal (%v) and DateTimeOriginal: %w", err, fallbackErr)
 		}
 	}
-
-	// Convert to JST if not already
-	createdAt = createdAt.In(jst)
 
 	sourceFile, err := fileInfo.GetString("SourceFile")
 	if err != nil {
@@ -501,25 +498,30 @@ func getExifdata(et *exiftool.Exiftool, path string) (Photo, error) {
 	}, nil
 }
 
-func getExifTime(fileInfo exiftool.FileMetadata, key string, loc *time.Location) (time.Time, error) {
+func getExifTime(fileInfo exiftool.FileMetadata, key string) (time.Time, error) {
 	value, err := fileInfo.GetString(key)
 	if err != nil {
 		return time.Time{}, err
 	}
-	return parseExifTime(value, loc)
+	return parseExifTime(value)
 }
 
 // parseExifTime parses an EXIF date time such as "2024:01:02 15:04:05",
 // optionally followed by fractional seconds of any length and a time zone
-// offset. A value without an offset is taken to be in loc.
-func parseExifTime(value string, loc *time.Location) (time.Time, error) {
+// offset.
+//
+// The result keeps the clock time where the photo was taken, as EXIF records
+// it; it is never converted to another time zone. A value with an offset keeps
+// that offset, and one without is put in UTC only to hold the clock time as is,
+// since a zone with daylight saving time would shift times that it skips.
+func parseExifTime(value string) (time.Time, error) {
 	// When parsing, Go accepts fractional seconds right after the seconds
 	// field even if the layout does not have them.
-	t, err := time.ParseInLocation("2006:01:02 15:04:05Z07:00", value, loc)
+	t, err := time.Parse("2006:01:02 15:04:05Z07:00", value)
 	if err == nil {
 		return t, nil
 	}
-	return time.ParseInLocation("2006:01:02 15:04:05", value, loc)
+	return time.Parse("2006:01:02 15:04:05", value)
 }
 
 func walkDir(root string) ([]string, error) {
