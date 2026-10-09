@@ -224,7 +224,7 @@ func TestRenameWithMockFS(t *testing.T) {
 
 	t.Run("normal rename calls MkdirAll then Rename", func(t *testing.T) {
 		fs := newMockFS()
-		cli := CLI{opt: Option{}, fs: fs}
+		cli := CLI{opt: Option{}, fs: fs, paths: newPathReserver()}
 		got, dryrun, err := cli.rename(photo)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -245,7 +245,7 @@ func TestRenameWithMockFS(t *testing.T) {
 
 	t.Run("dryrun skips all fs operations", func(t *testing.T) {
 		fs := newMockFS()
-		cli := CLI{opt: Option{Dryrun: true}, fs: fs}
+		cli := CLI{opt: Option{Dryrun: true}, fs: fs, paths: newPathReserver()}
 		got, dryrun, err := cli.rename(photo)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -268,7 +268,7 @@ func TestRenameWithMockFS(t *testing.T) {
 	t.Run("rename error propagates", func(t *testing.T) {
 		fs := newMockFS()
 		fs.renameErr = errors.New("permission denied")
-		cli := CLI{opt: Option{}, fs: fs}
+		cli := CLI{opt: Option{}, fs: fs, paths: newPathReserver()}
 		_, _, err := cli.rename(photo)
 		if err == nil || err.Error() != "permission denied" {
 			t.Errorf("expected 'permission denied', got %v", err)
@@ -277,13 +277,111 @@ func TestRenameWithMockFS(t *testing.T) {
 
 	t.Run("MkdirAll creates parent of RenamedPath", func(t *testing.T) {
 		fs := newMockFS()
-		cli := CLI{opt: Option{GroupByDate: true}, fs: fs}
+		cli := CLI{opt: Option{GroupByDate: true}, fs: fs, paths: newPathReserver()}
 		got, _, _ := cli.rename(photo)
 		expectedDir := filepath.Dir(got.RenamedPath)
 		if len(fs.dirs) != 1 || fs.dirs[0] != expectedDir {
 			t.Errorf("MkdirAll dir = %v, want %q", fs.dirs, expectedDir)
 		}
 	})
+}
+
+func TestRenameCollision(t *testing.T) {
+	jst := time.FixedZone("JST", 9*60*60)
+	createdAt := time.Date(2024, 3, 15, 14, 30, 45, 0, jst)
+	newPhoto := func(name string) Photo {
+		return Photo{
+			Name:      name,
+			Path:      "/photos/raw/" + name,
+			Dir:       "/photos/raw",
+			Extension: "jpg",
+			CreatedAt: createdAt,
+		}
+	}
+
+	for _, dryrun := range []bool{false, true} {
+		t.Run(map[bool]string{false: "rename", true: "dryrun"}[dryrun], func(t *testing.T) {
+			cli := CLI{opt: Option{Dryrun: dryrun}, fs: newMockFS(), paths: newPathReserver()}
+			var got []string
+			for _, name := range []string{"a.jpg", "b.jpg", "c.jpg"} {
+				photo, _, err := cli.rename(newPhoto(name))
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				got = append(got, photo.RenamedPath)
+			}
+			want := []string{
+				"/photos/raw/2024-03-15_14-30-45.jpg",
+				"/photos/raw/2024-03-15_14-30-45_1.jpg",
+				"/photos/raw/2024-03-15_14-30-45_2.jpg",
+			}
+			for i := range want {
+				if got[i] != want[i] {
+					t.Errorf("RenamedPath[%d] = %q, want %q", i, got[i], want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestPathReserver(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, nil, 0644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	want := filepath.Join(dir, "2024-03-15_14-30-45.jpg")
+
+	t.Run("skips a path taken by another file", func(t *testing.T) {
+		write("2024-03-15_14-30-45.jpg")
+		src := write("other.jpg")
+		got := newPathReserver().reserve(osFS{}, src, want)
+		if exp := filepath.Join(dir, "2024-03-15_14-30-45_1.jpg"); got != exp {
+			t.Errorf("reserve() = %q, want %q", got, exp)
+		}
+	})
+
+	t.Run("keeps the path the source already has", func(t *testing.T) {
+		src := write("2024-03-15_14-30-45.jpg")
+		got := newPathReserver().reserve(osFS{}, src, want)
+		if got != want {
+			t.Errorf("reserve() = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestParseExifTime(t *testing.T) {
+	jst := time.FixedZone("JST", 9*60*60)
+	tests := []struct {
+		value string
+		want  time.Time
+	}{
+		{"2024:01:02 15:04:05", time.Date(2024, 1, 2, 15, 4, 5, 0, jst)},
+		{"2024:01:02 15:04:05+09:00", time.Date(2024, 1, 2, 15, 4, 5, 0, jst)},
+		{"2024:01:02 15:04:05.123+09:00", time.Date(2024, 1, 2, 15, 4, 5, 123e6, jst)},
+		{"2024:01:02 15:04:05.12+09:00", time.Date(2024, 1, 2, 15, 4, 5, 120e6, jst)},
+		{"2024:01:02 15:04:05.1234-05:00", time.Date(2024, 1, 2, 15, 4, 5, 123400e3, time.FixedZone("", -5*60*60))},
+		{"2024:01:02 15:04:05.5Z", time.Date(2024, 1, 2, 15, 4, 5, 500e6, time.UTC)},
+		{"2024:01:02 15:04:05.123", time.Date(2024, 1, 2, 15, 4, 5, 123e6, jst)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			got, err := parseExifTime(tt.value, jst)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !got.Equal(tt.want) {
+				t.Errorf("parseExifTime(%q) = %v, want %v", tt.value, got, tt.want)
+			}
+		})
+	}
+
+	if _, err := parseExifTime("not a time", jst); err == nil {
+		t.Error("expected an error for an invalid value")
+	}
 }
 
 // --- clean tests (with mockFS + mockSender) ---
