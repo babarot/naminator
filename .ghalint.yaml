@@ -1,0 +1,6 @@
+excludes:
+  # tagpr pushes the release branch and tags with git, which needs the
+  # credentials actions/checkout persists
+  - policy_name: checkout_persist_credentials_should_be_false
+    workflow_file_path: .github/workflows/release.yaml
+    job_name: tagpr
