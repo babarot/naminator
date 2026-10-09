@@ -43,7 +43,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: 'go.mod'
+          go-version: stable
       - name: Install Nix
         # GoReleaser needs nix-hash to publish to babarot/nur-packages
         uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1

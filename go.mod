@@ -1,6 +1,6 @@
 module github.com/babarot/naminator
 
-go 1.23
+go 1.26.0
 
 require (
 	github.com/barasher/go-exiftool v1.10.0
@@ -11,7 +11,7 @@ require (
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/nxadm/tail v1.4.11
-	golang.org/x/term v0.27.0
+	golang.org/x/term v0.46.0
 )
 
 require (
@@ -29,9 +29,9 @@ require (
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.15.2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	golang.org/x/net v0.33.0 // indirect
-	golang.org/x/sync v0.10.0 // indirect
-	golang.org/x/sys v0.28.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 )
