@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -69,11 +70,26 @@ func (osFS) MkdirAll(path string, perm os.FileMode) error  { return os.MkdirAll(
 func (osFS) RemoveAll(path string) error                   { return os.RemoveAll(path) }
 func (osFS) Stat(name string) (os.FileInfo, error)         { return os.Stat(name) }
 
-// exiftoolExtractor is the real ExifExtractor using go-exiftool.
-type exiftoolExtractor struct{}
+// exiftoolExtractor is the real ExifExtractor using go-exiftool. It keeps
+// one exiftool process running (stay_open) and reuses it for every file.
+type exiftoolExtractor struct {
+	et *exiftool.Exiftool
+}
 
-func (exiftoolExtractor) Extract(path string) (Photo, error) {
-	return getExifdata(path)
+func newExiftoolExtractor() (exiftoolExtractor, error) {
+	et, err := exiftool.NewExiftool()
+	if err != nil {
+		return exiftoolExtractor{}, fmt.Errorf("failed to run exiftool: %w", err)
+	}
+	return exiftoolExtractor{et: et}, nil
+}
+
+func (e exiftoolExtractor) Extract(path string) (Photo, error) {
+	return getExifdata(e.et, path)
+}
+
+func (e exiftoolExtractor) Close() error {
+	return e.et.Close()
 }
 
 type CLI struct {
@@ -83,7 +99,9 @@ type CLI struct {
 	p      *tea.Program
 	sender Sender
 	images []string
-	exif   ExifExtractor
+	// exifs has one extractor per worker; images are processed in parallel
+	// by len(exifs) workers.
+	exifs  []ExifExtractor
 	fs     FileSystem
 	paths  *pathReserver
 }
@@ -183,6 +201,17 @@ func runMain() error {
 		return errors.New("no images given")
 	}
 
+	// go-exiftool serializes calls on one process, so give each worker its own
+	var exifs []ExifExtractor
+	for range min(runtime.NumCPU(), len(images)) {
+		e, err := newExiftoolExtractor()
+		if err != nil {
+			return err
+		}
+		defer e.Close()
+		exifs = append(exifs, e)
+	}
+
 	p := tea.NewProgram(newModel(len(images)))
 	cli := CLI{
 		args: args,
@@ -194,7 +223,7 @@ func runMain() error {
 		p:      p,
 		sender: p,
 		images: images,
-		exif:   exiftoolExtractor{},
+		exifs:  exifs,
 		fs:     osFS{},
 		paths:  newPathReserver(),
 	}
@@ -213,50 +242,9 @@ func (c CLI) run() error {
 	c.logger.Debug("start")
 	defer c.logger.Debug("end")
 
-	var wg sync.WaitGroup
-
-	for _, image := range c.images {
-		image := image
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			startTime := time.Now()
-			photo, err := c.exif.Extract(image)
-			c.sender.Send(exifResultMsg{
-				photo:    photo,
-				duration: duration(time.Since(startTime)),
-				err:      err,
-			})
-			if err != nil {
-				c.logger.Error("failed to get exif, so skip to rename", "err", err,
-					"name", photo.Name,
-					"path", photo.Path)
-				return
-			}
-			photo, dryrun, err := c.rename(photo)
-			if dryrun {
-				c.sender.Send(renameResultMsg{photo: photo, dryrun: true})
-			} else {
-				c.sender.Send(renameResultMsg{photo: photo, dryrun: false, err: err})
-			}
-			if err != nil {
-				c.logger.Error("failed to rename", "err", err,
-					"name", photo.Name,
-					"from", photo.Path,
-					"to", photo.RenamedPath)
-			} else {
-				c.logger.Debug("renamed",
-					"name", photo.Name,
-					"from", photo.Path,
-					"to", photo.RenamedPath)
-			}
-		}()
-	}
-
 	go func() {
-		// Wait for all goroutines handling photo processing to complete
-		wg.Wait()
-		// Remove empty directories after processing is done
+		// Process all photos, then remove empty directories
+		c.processAll()
 		c.clean(c.args)
 		// Signal completion to stop UI rendering
 		c.sender.Send(finishMsg{})
@@ -270,6 +258,60 @@ func (c CLI) run() error {
 	}
 
 	return nil
+}
+
+// processAll processes c.images with one worker per extractor in c.exifs
+// and returns when all of them are done.
+func (c CLI) processAll() {
+	images := make(chan string)
+	var wg sync.WaitGroup
+	for _, exif := range c.exifs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for image := range images {
+				c.process(exif, image)
+			}
+		}()
+	}
+	for _, image := range c.images {
+		images <- image
+	}
+	close(images)
+	wg.Wait()
+}
+
+func (c CLI) process(exif ExifExtractor, image string) {
+	startTime := time.Now()
+	photo, err := exif.Extract(image)
+	c.sender.Send(exifResultMsg{
+		photo:    photo,
+		duration: duration(time.Since(startTime)),
+		err:      err,
+	})
+	if err != nil {
+		c.logger.Error("failed to get exif, so skip to rename", "err", err,
+			"name", photo.Name,
+			"path", photo.Path)
+		return
+	}
+	photo, dryrun, err := c.rename(photo)
+	if dryrun {
+		c.sender.Send(renameResultMsg{photo: photo, dryrun: true})
+	} else {
+		c.sender.Send(renameResultMsg{photo: photo, dryrun: false, err: err})
+	}
+	if err != nil {
+		c.logger.Error("failed to rename", "err", err,
+			"name", photo.Name,
+			"from", photo.Path,
+			"to", photo.RenamedPath)
+	} else {
+		c.logger.Debug("renamed",
+			"name", photo.Name,
+			"from", photo.Path,
+			"to", photo.RenamedPath)
+	}
 }
 
 // buildNewPath computes the destination path for a photo based on options.
@@ -399,18 +441,13 @@ type Photo struct {
 	CreatedAt   time.Time
 }
 
-func getExifdata(path string) (Photo, error) {
+func getExifdata(et *exiftool.Exiftool, path string) (Photo, error) {
 	base := filepath.Base(path)
 
 	photo := Photo{
 		Name: base,
 		Path: path,
 	}
-	et, err := exiftool.NewExiftool()
-	if err != nil {
-		return photo, fmt.Errorf("failed to run exiftool: %w", err)
-	}
-	defer et.Close()
 
 	fileInfos := et.ExtractMetadata(path)
 	if len(fileInfos) == 0 {
