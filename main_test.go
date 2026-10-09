@@ -2,6 +2,9 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -381,6 +384,83 @@ func TestParseExifTime(t *testing.T) {
 
 	if _, err := parseExifTime("not a time", jst); err == nil {
 		t.Error("expected an error for an invalid value")
+	}
+}
+
+// countingExif wraps mockExif and records how many files it extracted.
+type countingExif struct {
+	mockExif
+	mu    sync.Mutex
+	count int
+}
+
+func (c *countingExif) Extract(path string) (Photo, error) {
+	c.mu.Lock()
+	c.count++
+	c.mu.Unlock()
+	return c.mockExif.Extract(path)
+}
+
+func TestProcessAll(t *testing.T) {
+	jst := time.FixedZone("JST", 9*60*60)
+	photos := map[string]Photo{}
+	var images []string
+	for i := range 20 {
+		path := filepath.Join("/photos/raw", fmt.Sprintf("%02d.jpg", i))
+		images = append(images, path)
+		photos[path] = Photo{
+			Name:      filepath.Base(path),
+			Path:      path,
+			Dir:       "/photos/raw",
+			Extension: "jpg",
+			CreatedAt: time.Date(2024, 3, 15, 14, 30, i, 0, jst),
+		}
+	}
+	// A file without EXIF data
+	images = append(images, "/photos/raw/noexif.jpg")
+
+	exifs := []*countingExif{
+		{mockExif: mockExif{photos: photos}},
+		{mockExif: mockExif{photos: photos}},
+		{mockExif: mockExif{photos: photos}},
+	}
+	sender := &mockSender{}
+	cli := CLI{
+		opt:    Option{Dryrun: true},
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		sender: sender,
+		images: images,
+		fs:     newMockFS(),
+		paths:  newPathReserver(),
+	}
+	for _, e := range exifs {
+		cli.exifs = append(cli.exifs, e)
+	}
+	cli.processAll()
+
+	total := 0
+	for _, e := range exifs {
+		total += e.count
+	}
+	if total != len(images) {
+		t.Errorf("extracted %d files, want %d", total, len(images))
+	}
+
+	var exifOK, exifFailed, renamed int
+	for _, msg := range sender.getMessages() {
+		switch m := msg.(type) {
+		case exifResultMsg:
+			if m.err != nil {
+				exifFailed++
+			} else {
+				exifOK++
+			}
+		case renameResultMsg:
+			renamed++
+		}
+	}
+	if exifOK != 20 || exifFailed != 1 || renamed != 20 {
+		t.Errorf("exif ok=%d failed=%d renamed=%d, want 20, 1, 20", exifOK, exifFailed, renamed)
 	}
 }
 
