@@ -85,6 +85,7 @@ type CLI struct {
 	images []string
 	exif   ExifExtractor
 	fs     FileSystem
+	paths  *pathReserver
 }
 
 func main() {
@@ -155,10 +156,13 @@ func runMain() error {
 			return fmt.Errorf("%s: not supported debug type", debug)
 		}
 		t, err := tail.TailFile(logPath, tailConfig)
+		if err != nil {
+			return err
+		}
 		for line := range t.Lines {
 			fmt.Println(line.Text)
 		}
-		return err
+		return nil
 	}
 
 	// Validate the GroupExtFirst flag - it requires both GroupByDate and GroupByExt
@@ -192,6 +196,7 @@ func runMain() error {
 		images: images,
 		exif:   exiftoolExtractor{},
 		fs:     osFS{},
+		paths:  newPathReserver(),
 	}
 
 	return cli.run()
@@ -298,8 +303,51 @@ func buildNewPath(photo Photo, opt Option) string {
 	))
 }
 
+// pathReserver hands out destination paths so that no two photos in a run,
+// and no photo and an existing file, end up with the same path.
+type pathReserver struct {
+	mu    sync.Mutex
+	paths map[string]bool
+}
+
+func newPathReserver() *pathReserver {
+	return &pathReserver{paths: map[string]bool{}}
+}
+
+// reserve returns want if it is free, or else the first free path made by
+// adding _1, _2, ... before the extension. A path that src itself already
+// occupies counts as free, so renaming a photo to its current name is a no-op.
+func (r *pathReserver) reserve(fsys FileSystem, src, want string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	ext := filepath.Ext(want)
+	base := strings.TrimSuffix(want, ext)
+	for i := 0; ; i++ {
+		path := want
+		if i > 0 {
+			path = fmt.Sprintf("%s_%d%s", base, i, ext)
+		}
+		if r.paths[path] || isOtherFile(fsys, path, src) {
+			continue
+		}
+		r.paths[path] = true
+		return path
+	}
+}
+
+// isOtherFile reports whether path exists and is not the file at src.
+func isOtherFile(fsys FileSystem, path, src string) bool {
+	fi, err := fsys.Stat(path)
+	if err != nil {
+		return false
+	}
+	srcFi, err := fsys.Stat(src)
+	return err != nil || !os.SameFile(fi, srcFi)
+}
+
 func (c CLI) rename(photo Photo) (Photo, bool, error) {
-	photo.RenamedPath = buildNewPath(photo, c.opt)
+	photo.RenamedPath = c.paths.reserve(c.fs, photo.Path, buildNewPath(photo, c.opt))
 	if c.opt.Dryrun {
 		return photo, true, nil
 	}
@@ -373,7 +421,7 @@ func getExifdata(path string) (Photo, error) {
 	fileInfo := fileInfos[0]
 
 	if fileInfo.Err != nil {
-		return photo, fmt.Errorf("file info error: %w", err)
+		return photo, fmt.Errorf("file info error: %w", fileInfo.Err)
 	}
 
 	filename, err := fileInfo.GetString("FileName")
@@ -382,28 +430,15 @@ func getExifdata(path string) (Photo, error) {
 		return photo, fmt.Errorf("error on 'FileName': %w", err)
 	}
 
-	// Try SubSecDateTimeOriginal first, fallback to DateTimeOriginal if not available
-	var createdAt time.Time
+	// Try SubSecDateTimeOriginal first, fallback to DateTimeOriginal if it is
+	// missing or cannot be parsed
 	jst := time.FixedZone("JST", 9*60*60)
-
-	dateTime, err := fileInfo.GetString("SubSecDateTimeOriginal")
-	if err == nil {
-		// SubSecDateTimeOriginal is available (includes timezone info)
-		createdAt, err = time.Parse("2006:01:02 15:04:05.000-07:00", dateTime)
-		if err != nil {
-			return photo, fmt.Errorf("failed to parse SubSecDateTimeOriginal: %w", err)
-		}
-	} else {
-		// Fallback to DateTimeOriginal (no timezone info, treat as JST)
-		dateTime, err = fileInfo.GetString("DateTimeOriginal")
-		if err != nil {
-			return photo, fmt.Errorf("error on both SubSecDateTimeOriginal and DateTimeOriginal: %w", err)
-		}
-
-		// Parse without timezone and treat as JST
-		createdAt, err = time.ParseInLocation("2006:01:02 15:04:05", dateTime, jst)
-		if err != nil {
-			return photo, fmt.Errorf("failed to parse DateTimeOriginal: %w", err)
+	createdAt, err := getExifTime(fileInfo, "SubSecDateTimeOriginal", jst)
+	if err != nil {
+		var fallbackErr error
+		createdAt, fallbackErr = getExifTime(fileInfo, "DateTimeOriginal", jst)
+		if fallbackErr != nil {
+			return photo, fmt.Errorf("error on both SubSecDateTimeOriginal (%v) and DateTimeOriginal: %w", err, fallbackErr)
 		}
 	}
 
@@ -427,6 +462,27 @@ func getExifdata(path string) (Photo, error) {
 		Extension: ext,
 		CreatedAt: createdAt,
 	}, nil
+}
+
+func getExifTime(fileInfo exiftool.FileMetadata, key string, loc *time.Location) (time.Time, error) {
+	value, err := fileInfo.GetString(key)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return parseExifTime(value, loc)
+}
+
+// parseExifTime parses an EXIF date time such as "2024:01:02 15:04:05",
+// optionally followed by fractional seconds of any length and a time zone
+// offset. A value without an offset is taken to be in loc.
+func parseExifTime(value string, loc *time.Location) (time.Time, error) {
+	// When parsing, Go accepts fractional seconds right after the seconds
+	// field even if the layout does not have them.
+	t, err := time.ParseInLocation("2006:01:02 15:04:05Z07:00", value, loc)
+	if err == nil {
+		return t, nil
+	}
+	return time.ParseInLocation("2006:01:02 15:04:05", value, loc)
 }
 
 func walkDir(root string) ([]string, error) {
