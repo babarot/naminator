@@ -14,11 +14,6 @@ import (
 
 const maxHeight = 30
 
-var (
-	showProgressSet bool
-	showProgress    bool
-)
-
 type model struct {
 	progress     progress.Model
 	spinner      spinner.Model
@@ -29,6 +24,9 @@ type model struct {
 	files        map[string]state
 	total        int
 	height       int
+	// showProgress is decided once, when showProgressSet becomes true
+	showProgress    bool
+	showProgressSet bool
 }
 
 type state uint8
@@ -144,6 +142,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
+		m.decideProgress()
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
@@ -153,10 +152,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m model) View() string {
-	var s string
-
-	var successes, failures int
+// counts returns how many files have succeeded and failed so far.
+func (m model) counts() (successes, failures int) {
 	for _, state := range m.files {
 		switch state {
 		case succeeded:
@@ -165,6 +162,28 @@ func (m model) View() string {
 			failures++
 		}
 	}
+	return successes, failures
+}
+
+func (m model) percent() float64 {
+	successes, failures := m.counts()
+	return float64(successes+failures) / float64(m.total)
+}
+
+// decideProgress decides, once 3 seconds have passed, whether to show the
+// progress bar: it is shown when less than a quarter is done by then.
+func (m *model) decideProgress() {
+	if m.showProgressSet || time.Since(m.startTime) <= 3*time.Second {
+		return
+	}
+	m.showProgress = m.percent() < 0.25
+	m.showProgressSet = true
+}
+
+func (m model) View() string {
+	var s string
+
+	successes, failures := m.counts()
 
 	if m.quitting {
 		s += "Renaming done. Time: " +
@@ -197,12 +216,7 @@ func (m model) View() string {
 
 	s += "\n"
 
-	percent := float64(successes+failures) / float64(m.total)
-	if time.Since(m.startTime).Seconds() > 3.0 && !showProgressSet {
-		showProgress = percent < 0.25
-		showProgressSet = true
-	}
-	if percent < 1 && (m.total > 100 || showProgress) {
+	if percent := m.percent(); percent < 1 && (m.total > 100 || m.showProgress) {
 		s += m.progress.ViewAs(percent)
 		s += "\n"
 	}

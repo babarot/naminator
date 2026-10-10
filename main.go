@@ -393,7 +393,9 @@ func (c CLI) rename(photo Photo) (Photo, bool, error) {
 	if c.opt.Dryrun {
 		return photo, true, nil
 	}
-	_ = c.fs.MkdirAll(filepath.Dir(photo.RenamedPath), 0755)
+	if err := c.fs.MkdirAll(filepath.Dir(photo.RenamedPath), 0755); err != nil {
+		return photo, false, err
+	}
 	return photo, false, c.fs.Rename(photo.Path, photo.RenamedPath)
 }
 
@@ -547,7 +549,6 @@ func getImages(dirs []string) ([]string, error) {
 			return []string{}, err
 		}
 		for _, file := range files {
-			file := file
 			mime, _ := mimetype.DetectFile(file)
 			if !strings.Contains(mime.String(), "image") {
 				continue

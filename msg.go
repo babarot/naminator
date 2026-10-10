@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -71,7 +72,7 @@ func (r renameResultMsg) String() string {
 			errorStyle.Render("FAILED"),
 			r.err.Error())
 	}
-	renamedPath := strings.ReplaceAll(r.photo.RenamedPath, os.Getenv("HOME"), "~")
+	renamedPath := abbrevHome(r.photo.RenamedPath, os.Getenv("HOME"))
 	if r.dryrun {
 		return fmt.Sprintf("%s: %s Would rename %s",
 			r.photo.Name,
@@ -83,6 +84,21 @@ func (r renameResultMsg) String() string {
 		r.photo.Name,
 		okStyle.Render("OK"),
 		renamedPath)
+}
+
+// abbrevHome replaces home at the start of path with "~".
+func abbrevHome(path, home string) string {
+	if home == "" {
+		return path
+	}
+	home = filepath.Clean(home)
+	if path == home {
+		return "~"
+	}
+	if rest, ok := strings.CutPrefix(path, home+string(filepath.Separator)); ok {
+		return filepath.Join("~", rest)
+	}
+	return path
 }
 
 func (r exifResultMsg) Path() string { return r.photo.Path }

@@ -44,6 +44,7 @@ type mockFS struct {
 	dirs       []string
 	removed    []string
 	renameErr  error
+	mkdirErr   error
 	removeErr  error
 	statFunc   func(string) (os.FileInfo, error)
 }
@@ -61,6 +62,9 @@ func (m *mockFS) Rename(oldpath, newpath string) error {
 }
 
 func (m *mockFS) MkdirAll(path string, perm os.FileMode) error {
+	if m.mkdirErr != nil {
+		return m.mkdirErr
+	}
 	m.dirs = append(m.dirs, path)
 	return nil
 }
@@ -275,6 +279,19 @@ func TestRenameWithMockFS(t *testing.T) {
 		_, _, err := cli.rename(photo)
 		if err == nil || err.Error() != "permission denied" {
 			t.Errorf("expected 'permission denied', got %v", err)
+		}
+	})
+
+	t.Run("MkdirAll error propagates without renaming", func(t *testing.T) {
+		fs := newMockFS()
+		fs.mkdirErr = errors.New("read-only file system")
+		cli := CLI{opt: Option{}, fs: fs, paths: newPathReserver()}
+		_, _, err := cli.rename(photo)
+		if err == nil || err.Error() != "read-only file system" {
+			t.Errorf("expected 'read-only file system', got %v", err)
+		}
+		if len(fs.renamed) != 0 {
+			t.Error("fs.Rename should not be called when MkdirAll fails")
 		}
 	})
 

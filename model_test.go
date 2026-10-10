@@ -2,7 +2,9 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"testing"
+	"time"
 )
 
 // mockResultMsg implements resultMsg for testing
@@ -141,6 +143,45 @@ func TestTrimNonErrorMessageAndAppend(t *testing.T) {
 
 		if len(m.results) > m.height {
 			t.Errorf("len = %d, should not exceed height %d", len(m.results), m.height)
+		}
+	})
+}
+
+func TestDecideProgress(t *testing.T) {
+	newTestModel := func(done int, elapsed time.Duration) model {
+		m := model{files: map[string]state{}, total: 100, startTime: time.Now().Add(-elapsed)}
+		for i := range done {
+			m.files[fmt.Sprint(i)] = succeeded
+		}
+		return m
+	}
+
+	t.Run("undecided before 3 seconds", func(t *testing.T) {
+		m := newTestModel(0, time.Second)
+		m.decideProgress()
+		if m.showProgressSet {
+			t.Error("should not decide before 3 seconds")
+		}
+	})
+
+	t.Run("shown when less than a quarter is done", func(t *testing.T) {
+		m := newTestModel(10, 4*time.Second)
+		m.decideProgress()
+		if !m.showProgressSet || !m.showProgress {
+			t.Errorf("showProgressSet=%v showProgress=%v, want true, true", m.showProgressSet, m.showProgress)
+		}
+	})
+
+	t.Run("hidden when a quarter or more is done, and kept", func(t *testing.T) {
+		m := newTestModel(50, 4*time.Second)
+		m.decideProgress()
+		if !m.showProgressSet || m.showProgress {
+			t.Errorf("showProgressSet=%v showProgress=%v, want true, false", m.showProgressSet, m.showProgress)
+		}
+		m.files = map[string]state{}
+		m.decideProgress()
+		if m.showProgress {
+			t.Error("the decision should not change once made")
 		}
 	})
 }
