@@ -1,5 +1,24 @@
 # Changelog
 
+## [v0.2.6](https://github.com/babarot/naminator/compare/v0.2.5...v0.2.6) - 2026-10-10
+
+### Bug fixes
+- Fix overwriting photos taken in the same second and other bugs by @babarot in https://github.com/babarot/naminator/pull/36
+- Remove empty subdirectories and ignore OS junk files in --clean by @babarot in https://github.com/babarot/naminator/pull/41
+- Number photos taken in the same second in the order they were taken by @babarot in https://github.com/babarot/naminator/pull/43
+### Improvements
+- Reuse exiftool processes with a pool of workers by @babarot in https://github.com/babarot/naminator/pull/37
+- Name photos by the clock time where they were taken by @babarot in https://github.com/babarot/naminator/pull/38
+- Run golangci-lint and govulncheck in CI by @babarot in https://github.com/babarot/naminator/pull/40
+- Predict what --clean would remove in dry-run by @babarot in https://github.com/babarot/naminator/pull/42
+### Refactorings
+- Fix small issues in renaming and the UI by @babarot in https://github.com/babarot/naminator/pull/39
+### Others
+- Remove label sync; labels are managed in github-config by @babarot in https://github.com/babarot/naminator/pull/28
+- Use only kind/* labels for tagpr version bumps by @babarot in https://github.com/babarot/naminator/pull/30
+- Sync shared files from github-config by @babarot in https://github.com/babarot/naminator/pull/31
+- Use the shared PR labeler workflow by @babarot in https://github.com/babarot/naminator/pull/32
+
 ## [v0.2.5](https://github.com/babarot/naminator/compare/v0.2.4...v0.2.5) - 2026-09-27
 
 ### New Features
