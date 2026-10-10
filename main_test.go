@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -542,7 +543,7 @@ func TestClean(t *testing.T) {
 		}
 
 		fs := newMockFS()
-		// Use real Stat so isEmptyDir works
+		// Use real Stat so emptyDirs works
 		fs.statFunc = func(name string) (os.FileInfo, error) { return os.Stat(name) }
 		sender := &mockSender{}
 		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: fs}
@@ -667,39 +668,117 @@ func TestClean(t *testing.T) {
 			t.Errorf("RemoveAll called %d times, want 2", len(fs.removed))
 		}
 	})
+
+	t.Run("removes empty subdirectories and junk files for real", func(t *testing.T) {
+		root := filepath.Join(t.TempDir(), "DCIM")
+		makeTree(t, root, "100MSDCF/.DS_Store", "2024-03-15/a.jpg")
+
+		sender := &mockSender{}
+		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: osFS{}}
+		cli.clean([]string{root})
+
+		var got []string
+		for _, msg := range sender.getMessages() {
+			m := msg.(cleanResultMsg)
+			if m.err != nil {
+				t.Errorf("unexpected error for %s: %v", m.dir, m.err)
+			}
+			got = append(got, fmt.Sprintf("%s:%v", m.dir, m.empty))
+		}
+		if want := "DCIM/100MSDCF:true,DCIM:false"; strings.Join(got, ",") != want {
+			t.Errorf("messages = %v, want %s", got, want)
+		}
+		if _, err := os.Stat(filepath.Join(root, "100MSDCF")); !os.IsNotExist(err) {
+			t.Error("DCIM/100MSDCF should be removed")
+		}
+		if _, err := os.Stat(filepath.Join(root, "2024-03-15", "a.jpg")); err != nil {
+			t.Errorf("DCIM/2024-03-15/a.jpg should be kept: %v", err)
+		}
+	})
+
+	t.Run("removes a directory with only junk files left", func(t *testing.T) {
+		root := filepath.Join(t.TempDir(), "card")
+		makeTree(t, root, ".DS_Store")
+
+		sender := &mockSender{}
+		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: osFS{}}
+		cli.clean([]string{root})
+
+		msgs := sender.getMessages()
+		if len(msgs) != 1 || !msgs[0].(cleanResultMsg).empty {
+			t.Fatalf("expected one removed message, got %v", msgs)
+		}
+		if _, err := os.Stat(root); !os.IsNotExist(err) {
+			t.Error("card should be removed")
+		}
+	})
 }
 
 // --- Filesystem utility tests ---
 
-func TestIsEmptyDir(t *testing.T) {
-	t.Run("empty dir", func(t *testing.T) {
-		dir := t.TempDir()
-		empty, err := isEmptyDir(dir)
-		if err != nil {
+// makeTree creates files (and their directories) under root, and directories
+// for paths ending with "/".
+func makeTree(t *testing.T, root string, paths ...string) {
+	t.Helper()
+	for _, p := range paths {
+		path := filepath.Join(root, p)
+		if strings.HasSuffix(p, "/") {
+			if err := os.MkdirAll(path, 0755); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			t.Fatal(err)
 		}
-		if !empty {
-			t.Error("expected empty dir")
+		if err := os.WriteFile(path, []byte("x"), 0644); err != nil {
+			t.Fatal(err)
 		}
-	})
+	}
+}
 
-	t.Run("non-empty dir", func(t *testing.T) {
-		dir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("x"), 0644); err != nil {
-			t.Fatal(err)
-		}
-		empty, err := isEmptyDir(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if empty {
-			t.Error("expected non-empty dir")
-		}
-	})
+func TestEmptyDirs(t *testing.T) {
+	tests := []struct {
+		name      string
+		tree      []string
+		wantEmpty bool
+		wantDirs  []string
+	}{
+		{"empty", nil, true, []string{"."}},
+		{"only junk files", []string{".DS_Store", "Thumbs.db", "desktop.ini"}, true, []string{"."}},
+		{"a file", []string{"a.jpg"}, false, nil},
+		{"nested empty directories", []string{"a/b/", "a/.DS_Store", "c/"}, true, []string{"."}},
+		{
+			"empty directories next to a file",
+			[]string{"100MSDCF/.DS_Store", "2024-03-15/a.jpg", "2024-03-15/old/", "misc/x/", "misc/y/"},
+			false,
+			[]string{"100MSDCF", "2024-03-15/old", "misc"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			makeTree(t, root, tt.tree...)
+			empty, dirs, err := emptyDirs(root)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if empty != tt.wantEmpty {
+				t.Errorf("empty = %v, want %v", empty, tt.wantEmpty)
+			}
+			var got []string
+			for _, dir := range dirs {
+				rel, _ := filepath.Rel(root, dir)
+				got = append(got, rel)
+			}
+			if strings.Join(got, ",") != strings.Join(tt.wantDirs, ",") {
+				t.Errorf("dirs = %v, want %v", got, tt.wantDirs)
+			}
+		})
+	}
 
 	t.Run("non-existent dir", func(t *testing.T) {
-		_, err := isEmptyDir("/nonexistent/path")
-		if err == nil {
+		if _, _, err := emptyDirs("/nonexistent/path"); err == nil {
 			t.Error("expected error for non-existent dir")
 		}
 	})
