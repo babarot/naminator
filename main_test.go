@@ -521,7 +521,9 @@ func TestClean(t *testing.T) {
 		// Create a real temp file to get valid FileInfo for a file (not dir)
 		tmp := t.TempDir()
 		file := filepath.Join(tmp, "file.txt")
-		os.WriteFile(file, []byte("x"), 0644)
+		if err := os.WriteFile(file, []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
 
 		sender := &mockSender{}
 		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: osFS{}}
@@ -535,7 +537,9 @@ func TestClean(t *testing.T) {
 	t.Run("removes empty directory", func(t *testing.T) {
 		dir := t.TempDir()
 		emptyDir := filepath.Join(dir, "empty")
-		os.MkdirAll(emptyDir, 0755)
+		if err := os.MkdirAll(emptyDir, 0755); err != nil {
+			t.Fatal(err)
+		}
 
 		fs := newMockFS()
 		// Use real Stat so isEmptyDir works
@@ -565,7 +569,9 @@ func TestClean(t *testing.T) {
 
 	t.Run("does not remove non-empty directory", func(t *testing.T) {
 		dir := t.TempDir()
-		os.WriteFile(filepath.Join(dir, "file.txt"), []byte("x"), 0644)
+		if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
 
 		fs := newMockFS()
 		fs.statFunc = func(name string) (os.FileInfo, error) { return os.Stat(name) }
@@ -589,7 +595,9 @@ func TestClean(t *testing.T) {
 	t.Run("dryrun does not actually remove", func(t *testing.T) {
 		dir := t.TempDir()
 		emptyDir := filepath.Join(dir, "empty")
-		os.MkdirAll(emptyDir, 0755)
+		if err := os.MkdirAll(emptyDir, 0755); err != nil {
+			t.Fatal(err)
+		}
 
 		fs := newMockFS()
 		fs.statFunc = func(name string) (os.FileInfo, error) { return os.Stat(name) }
@@ -613,7 +621,9 @@ func TestClean(t *testing.T) {
 	t.Run("RemoveAll error is sent as message", func(t *testing.T) {
 		dir := t.TempDir()
 		emptyDir := filepath.Join(dir, "empty")
-		os.MkdirAll(emptyDir, 0755)
+		if err := os.MkdirAll(emptyDir, 0755); err != nil {
+			t.Fatal(err)
+		}
 
 		fs := newMockFS()
 		fs.statFunc = func(name string) (os.FileInfo, error) { return os.Stat(name) }
@@ -636,8 +646,12 @@ func TestClean(t *testing.T) {
 		dir := t.TempDir()
 		empty1 := filepath.Join(dir, "a")
 		empty2 := filepath.Join(dir, "b")
-		os.MkdirAll(empty1, 0755)
-		os.MkdirAll(empty2, 0755)
+		if err := os.MkdirAll(empty1, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(empty2, 0755); err != nil {
+			t.Fatal(err)
+		}
 
 		fs := newMockFS()
 		fs.statFunc = func(name string) (os.FileInfo, error) { return os.Stat(name) }
@@ -671,7 +685,9 @@ func TestIsEmptyDir(t *testing.T) {
 
 	t.Run("non-empty dir", func(t *testing.T) {
 		dir := t.TempDir()
-		os.WriteFile(filepath.Join(dir, "file.txt"), []byte("x"), 0644)
+		if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
 		empty, err := isEmptyDir(dir)
 		if err != nil {
 			t.Fatal(err)
@@ -693,11 +709,17 @@ func TestWalkDir(t *testing.T) {
 	dir := t.TempDir()
 
 	subDir := filepath.Join(dir, "sub")
-	os.MkdirAll(subDir, 0755)
-	for _, name := range []string{"a.txt", "b.jpg"} {
-		os.WriteFile(filepath.Join(dir, name), []byte("x"), 0644)
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatal(err)
 	}
-	os.WriteFile(filepath.Join(subDir, "c.png"), []byte("x"), 0644)
+	for _, name := range []string{"a.txt", "b.jpg"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "c.png"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	files, err := walkDir(dir)
 	if err != nil {
