@@ -491,6 +491,76 @@ func TestProcessAll(t *testing.T) {
 	}
 }
 
+func TestProcessAllNamesBurstInOrder(t *testing.T) {
+	second := time.Date(2025, 1, 29, 21, 7, 43, 0, time.UTC)
+	tests := []struct {
+		name string
+		// shots maps an original file number to its sub-second time
+		shots map[string]time.Duration
+		// want is the shot numbers in the order they should be numbered
+		want []string
+	}{
+		{"same second without sub-seconds", map[string]time.Duration{"569": 0, "570": 0, "571": 0}, []string{"569", "570", "571"}},
+		{"sub-seconds win over file names", map[string]time.Duration{"569": 800 * time.Millisecond, "570": 100 * time.Millisecond, "571": 500 * time.Millisecond}, []string{"570", "571", "569"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			photos := map[string]Photo{}
+			var images []string
+			for num, subsec := range tt.shots {
+				for _, ext := range []string{"arw", "heif"} {
+					name := "A7C00" + num + "." + strings.ToUpper(ext)
+					path := filepath.Join("/DCIM/100MSDCF", name)
+					images = append(images, path)
+					photos[path] = Photo{
+						Name:      name,
+						Path:      path,
+						Dir:       "/DCIM/100MSDCF",
+						Extension: ext,
+						CreatedAt: second.Add(subsec),
+					}
+				}
+			}
+
+			// Workers finish in a different order each time, so repeat
+			for range 20 {
+				sender := &mockSender{}
+				cli := CLI{
+					opt:    Option{Dryrun: true, GroupByExt: true},
+					logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+					sender: sender,
+					images: images,
+					fs:     newMockFS(),
+					paths:  newPathReserver(),
+				}
+				for range 4 {
+					cli.exifs = append(cli.exifs, &mockExif{photos: photos})
+				}
+				cli.processAll()
+
+				got := map[string]string{}
+				for _, msg := range sender.getMessages() {
+					if m, ok := msg.(renameResultMsg); ok {
+						got[m.photo.RenamedPath] = m.photo.Name
+					}
+				}
+				for i, num := range tt.want {
+					suffix := ""
+					if i > 0 {
+						suffix = fmt.Sprintf("_%d", i)
+					}
+					for _, ext := range []string{"arw", "heif"} {
+						path := fmt.Sprintf("/DCIM/%s/2025-01-29_21-07-43%s.%s", ext, suffix, ext)
+						if want := "A7C00" + num + "." + strings.ToUpper(ext); got[path] != want {
+							t.Fatalf("%s is %s, want %s", path, got[path], want)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
 // --- clean tests (with mockFS + mockSender) ---
 
 func TestClean(t *testing.T) {

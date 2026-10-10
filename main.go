@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -263,17 +264,48 @@ func (c CLI) run() error {
 	return nil
 }
 
-// processAll processes c.images with one worker per extractor in c.exifs
-// and returns when all of them are done.
+// processAll processes c.images and returns when all of them are done. It
+// reads EXIF data with one worker per extractor in c.exifs, then renames the
+// photos in the order they were taken.
 func (c CLI) processAll() {
+	photos := c.extractAll()
+
+	// Rename in the order the photos were taken, so that photos taken in the
+	// same second get _1, _2, ... in that order, and the files of one shot
+	// (e.g. RAW and HEIF, with the same original name) get the same number
+	slices.SortStableFunc(photos, func(a, b Photo) int {
+		if n := a.CreatedAt.Compare(b.CreatedAt); n != 0 {
+			return n
+		}
+		if n := strings.Compare(a.Name, b.Name); n != 0 {
+			return n
+		}
+		return strings.Compare(a.Path, b.Path)
+	})
+	for _, photo := range photos {
+		c.renameAndReport(photo)
+	}
+}
+
+// extractAll reads EXIF data of c.images in parallel and returns the photos
+// it could read.
+func (c CLI) extractAll() []Photo {
 	images := make(chan string)
-	var wg sync.WaitGroup
+	var (
+		wg     sync.WaitGroup
+		mu     sync.Mutex
+		photos []Photo
+	)
 	for _, exif := range c.exifs {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for image := range images {
-				c.process(exif, image)
+				if photo, ok := c.extract(exif, image); ok {
+					mu.Lock()
+					photos = append(photos, photo)
+					mu.Unlock()
+				}
 			}
 		}()
 	}
@@ -282,9 +314,10 @@ func (c CLI) processAll() {
 	}
 	close(images)
 	wg.Wait()
+	return photos
 }
 
-func (c CLI) process(exif ExifExtractor, image string) {
+func (c CLI) extract(exif ExifExtractor, image string) (Photo, bool) {
 	startTime := time.Now()
 	photo, err := exif.Extract(image)
 	c.sender.Send(exifResultMsg{
@@ -296,8 +329,12 @@ func (c CLI) process(exif ExifExtractor, image string) {
 		c.logger.Error("failed to get exif, so skip to rename", "err", err,
 			"name", photo.Name,
 			"path", photo.Path)
-		return
+		return photo, false
 	}
+	return photo, true
+}
+
+func (c CLI) renameAndReport(photo Photo) {
 	photo, dryrun, err := c.rename(photo)
 	if dryrun {
 		c.sender.Send(renameResultMsg{photo: photo, dryrun: true})
