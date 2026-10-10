@@ -153,7 +153,7 @@ func runMain() error {
 	if err != nil {
 		return err
 	}
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 
 	if debug := opt.Meta.Debug; debug != "" {
 		shouldFollow := isatty.IsTerminal(os.Stdout.Fd())
@@ -184,7 +184,7 @@ func runMain() error {
 	}
 
 	// Validate the GroupExtFirst flag - it requires both GroupByDate and GroupByExt
-	if opt.GroupExtFirst && !(opt.GroupByDate && opt.GroupByExt) {
+	if opt.GroupExtFirst && (!opt.GroupByDate || !opt.GroupByExt) {
 		return fmt.Errorf("--group-ext-first requires both --group-by-date and --group-by-ext")
 	}
 
@@ -208,7 +208,7 @@ func runMain() error {
 		if err != nil {
 			return err
 		}
-		defer e.Close()
+		defer func() { _ = e.Close() }()
 		exifs = append(exifs, e)
 	}
 
@@ -564,7 +564,7 @@ func isEmptyDir(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	_, err = f.Readdirnames(1) // Or f.Readdir(1)
 	if err == io.EOF {

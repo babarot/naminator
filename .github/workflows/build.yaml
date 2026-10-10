@@ -1,6 +1,12 @@
 name: Go
 on:
+  push:
+    branches:
+    - main
   pull_request:
+  schedule:
+  # Weekly, to catch newly published vulnerabilities in govulncheck
+  - cron: '0 0 * * 1'
   workflow_dispatch:
 
 jobs:
@@ -26,3 +32,39 @@ jobs:
         cache: true
     - name: Run tests
       run: make test
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Install Go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: stable
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+      with:
+        version: v2.14.0
+
+  vulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Install Go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: stable
+    - name: Run govulncheck
+      run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...

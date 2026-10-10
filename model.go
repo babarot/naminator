@@ -189,13 +189,6 @@ func (m model) View() string {
 		s += "Renaming done. Time: " +
 			duration(time.Since(m.startTime)).String()
 		s += fmt.Sprintf(" (%d OK, %d failed, %d total)", successes, failures, m.total)
-		// if failures > 0 {
-		// 	s += "\n"
-		// 	s += fmt.Sprintf("%d %s detected. See %s for more details.",
-		// 		failures,
-		// 		map[bool]string{true: "issue", false: "issues"}[failures == 1],
-		// 		underStyle.Render("debug.log"))
-		// }
 	} else {
 		s += m.spinner.View() + " Processing photos... "
 		s += fmt.Sprintf("(%d/%d)", successes+failures, m.total)

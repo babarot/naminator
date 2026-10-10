@@ -11,6 +11,5 @@ var (
 	okStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#BBE896"))
 	warnStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFC999"))
 	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#D94F70"))
-	underStyle    = lipgloss.NewStyle().Underline(true)
 	appStyle      = lipgloss.NewStyle().Margin(1, 2, 0, 2)
 )
