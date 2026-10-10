@@ -712,6 +712,44 @@ func TestClean(t *testing.T) {
 			t.Error("card should be removed")
 		}
 	})
+
+	t.Run("dryrun predicts with the photos it would move", func(t *testing.T) {
+		parent := t.TempDir()
+		root := filepath.Join(parent, "DCIM")
+		makeTree(t, root, "100MSDCF/a.jpg", "100MSDCF/.DS_Store")
+		createdAt := time.Date(2024, 3, 15, 14, 30, 45, 0, time.UTC)
+
+		sender := &mockSender{}
+		cli := CLI{
+			opt:    Option{Clean: true, Dryrun: true, GroupByDate: true},
+			sender: sender,
+			fs:     osFS{},
+			paths:  newPathReserver(),
+			moves:  newPendingMoves(),
+		}
+		if _, _, err := cli.rename(Photo{
+			Name:      "a.jpg",
+			Path:      filepath.Join(root, "100MSDCF", "a.jpg"),
+			Dir:       filepath.Join(root, "100MSDCF"),
+			Extension: "jpg",
+			CreatedAt: createdAt,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		cli.clean([]string{root})
+
+		var got []string
+		for _, msg := range sender.getMessages() {
+			m := msg.(cleanResultMsg)
+			got = append(got, fmt.Sprintf("%s:%v:%v", m.dir, m.dryrun, m.empty))
+		}
+		if want := "DCIM/100MSDCF:true:true,DCIM:true:false"; strings.Join(got, ",") != want {
+			t.Errorf("messages = %v, want %s", got, want)
+		}
+		if _, err := os.Stat(filepath.Join(root, "100MSDCF", "a.jpg")); err != nil {
+			t.Errorf("dryrun should not touch files: %v", err)
+		}
+	})
 }
 
 // --- Filesystem utility tests ---
@@ -759,7 +797,7 @@ func TestEmptyDirs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			makeTree(t, root, tt.tree...)
-			empty, dirs, err := emptyDirs(root)
+			empty, dirs, err := emptyDirs(root, nil)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -777,8 +815,65 @@ func TestEmptyDirs(t *testing.T) {
 		})
 	}
 
+	t.Run("predicts with pending moves", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			moves     [][2]string // src, dst relative to the parent of root
+			wantEmpty bool
+			wantDirs  []string
+		}{
+			{"nothing moved", nil, false, nil},
+			{
+				"all moved out",
+				[][2]string{{"DCIM/100MSDCF/a.jpg", "2024-03-15/a.jpg"}, {"DCIM/100MSDCF/b.jpg", "2024-03-15/b.jpg"}},
+				true, []string{"."},
+			},
+			{
+				"moved into a new directory under root",
+				[][2]string{{"DCIM/100MSDCF/a.jpg", "DCIM/2024-03-15/a.jpg"}, {"DCIM/100MSDCF/b.jpg", "DCIM/2024-03-15/b.jpg"}},
+				false, []string{"100MSDCF"},
+			},
+			{
+				"renamed in place",
+				[][2]string{{"DCIM/100MSDCF/a.jpg", "DCIM/100MSDCF/x.jpg"}, {"DCIM/100MSDCF/b.jpg", "DCIM/100MSDCF/y.jpg"}},
+				false, nil,
+			},
+			{
+				"one file left",
+				[][2]string{{"DCIM/100MSDCF/a.jpg", "2024-03-15/a.jpg"}},
+				false, nil,
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				parent := t.TempDir()
+				root := filepath.Join(parent, "DCIM")
+				makeTree(t, root, "100MSDCF/a.jpg", "100MSDCF/b.jpg", "100MSDCF/.DS_Store")
+				moves := newPendingMoves()
+				for _, m := range tt.moves {
+					moves.add(filepath.Join(parent, m[0]), filepath.Join(parent, m[1]))
+				}
+				empty, dirs, err := emptyDirs(root, moves)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if empty != tt.wantEmpty {
+					t.Errorf("empty = %v, want %v", empty, tt.wantEmpty)
+				}
+				var got []string
+				for _, dir := range dirs {
+					rel, _ := filepath.Rel(root, dir)
+					got = append(got, rel)
+				}
+				if strings.Join(got, ",") != strings.Join(tt.wantDirs, ",") {
+					t.Errorf("dirs = %v, want %v", got, tt.wantDirs)
+				}
+			})
+		}
+	})
+
 	t.Run("non-existent dir", func(t *testing.T) {
-		if _, _, err := emptyDirs("/nonexistent/path"); err == nil {
+		if _, _, err := emptyDirs("/nonexistent/path", nil); err == nil {
 			t.Error("expected error for non-existent dir")
 		}
 	})

@@ -94,10 +94,18 @@ func TestCleanResultMsgString(t *testing.T) {
 		}
 	})
 
-	t.Run("dryrun", func(t *testing.T) {
-		msg := cleanResultMsg{dir: "mydir", dryrun: true}
+	t.Run("dryrun empty", func(t *testing.T) {
+		msg := cleanResultMsg{dir: "mydir", dryrun: true, empty: true}
 		s := msg.String()
-		if !strings.Contains(s, "Would remove if empty") {
+		if !strings.Contains(s, "Would remove because empty") {
+			t.Errorf("unexpected output: %q", s)
+		}
+	})
+
+	t.Run("dryrun not empty", func(t *testing.T) {
+		msg := cleanResultMsg{dir: "mydir", dryrun: true, empty: false}
+		s := msg.String()
+		if !strings.Contains(s, "Would not remove because NOT empty") {
 			t.Errorf("unexpected output: %q", s)
 		}
 	})
