@@ -413,23 +413,29 @@ func (c CLI) clean(paths []string) {
 		if !fi.IsDir() {
 			continue
 		}
-		empty, err := isEmptyDir(path)
+		removable, dirs, err := emptyDirs(path)
 		if err != nil {
-			c.sender.Send(cleanResultMsg{dir: base, err: fmt.Errorf("isEmptyDir: %w", err)})
+			c.sender.Send(cleanResultMsg{dir: base, err: fmt.Errorf("emptyDirs: %w", err)})
 			continue
 		}
 		if c.opt.Dryrun {
 			c.sender.Send(cleanResultMsg{dir: base, dryrun: true})
 			continue
 		}
-		if !empty {
-			c.sender.Send(cleanResultMsg{dir: base, empty: false})
-			continue
+		for _, dir := range dirs {
+			// Show a subdirectory as e.g. "DCIM/100MSDCF"
+			name := base
+			if rel, err := filepath.Rel(path, dir); err == nil && rel != "." {
+				name = filepath.Join(base, rel)
+			}
+			if err := c.fs.RemoveAll(dir); err != nil {
+				c.sender.Send(cleanResultMsg{dir: name, empty: true, err: err})
+			} else {
+				c.sender.Send(cleanResultMsg{dir: name, empty: true})
+			}
 		}
-		if err := c.fs.RemoveAll(path); err != nil {
-			c.sender.Send(cleanResultMsg{dir: base, empty: true, err: err})
-		} else {
-			c.sender.Send(cleanResultMsg{dir: base, empty: true})
+		if !removable {
+			c.sender.Send(cleanResultMsg{dir: base, empty: false})
 		}
 	}
 }
@@ -559,16 +565,41 @@ func getImages(dirs []string) ([]string, error) {
 	return images, nil
 }
 
-func isEmptyDir(name string) (bool, error) {
-	f, err := os.Open(name)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = f.Close() }()
+// junkFiles are files that the OS creates by itself. A directory that has
+// only these left counts as empty.
+var junkFiles = map[string]bool{
+	".DS_Store":   true, // macOS Finder
+	"Thumbs.db":   true, // Windows Explorer
+	"desktop.ini": true, // Windows Explorer
+}
 
-	_, err = f.Readdirnames(1) // Or f.Readdir(1)
-	if err == io.EOF {
-		return true, nil
+// emptyDirs reports whether dir is empty, and returns the empty directories
+// to remove: dir itself if it is empty, or else the outermost empty
+// directories under it. A directory is empty when it has nothing but junk
+// files and empty directories.
+func emptyDirs(dir string) (bool, []string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false, nil, err
 	}
-	return false, err // Either not empty or error, suits both cases
+	empty := true
+	var dirs []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			subEmpty, subDirs, err := emptyDirs(filepath.Join(dir, entry.Name()))
+			if err != nil {
+				return false, nil, err
+			}
+			empty = empty && subEmpty
+			dirs = append(dirs, subDirs...)
+			continue
+		}
+		if !junkFiles[entry.Name()] {
+			empty = false
+		}
+	}
+	if empty {
+		return true, []string{dir}, nil
+	}
+	return false, dirs, nil
 }
