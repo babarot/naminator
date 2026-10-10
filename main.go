@@ -104,6 +104,8 @@ type CLI struct {
 	exifs  []ExifExtractor
 	fs     FileSystem
 	paths  *pathReserver
+	// moves records the renames dry-run would do, for clean to predict
+	moves *pendingMoves
 }
 
 func main() {
@@ -226,6 +228,7 @@ func runMain() error {
 		exifs:  exifs,
 		fs:     osFS{},
 		paths:  newPathReserver(),
+		moves:  newPendingMoves(),
 	}
 
 	return cli.run()
@@ -391,6 +394,7 @@ func isOtherFile(fsys FileSystem, path, src string) bool {
 func (c CLI) rename(photo Photo) (Photo, bool, error) {
 	photo.RenamedPath = c.paths.reserve(c.fs, photo.Path, buildNewPath(photo, c.opt))
 	if c.opt.Dryrun {
+		c.moves.add(photo.Path, photo.RenamedPath)
 		return photo, true, nil
 	}
 	if err := c.fs.MkdirAll(filepath.Dir(photo.RenamedPath), 0755); err != nil {
@@ -413,13 +417,14 @@ func (c CLI) clean(paths []string) {
 		if !fi.IsDir() {
 			continue
 		}
-		removable, dirs, err := emptyDirs(path)
+		// In dry-run nothing has been moved, so predict with the pending moves
+		var moves *pendingMoves
+		if c.opt.Dryrun {
+			moves = c.moves
+		}
+		removable, dirs, err := emptyDirs(path, moves)
 		if err != nil {
 			c.sender.Send(cleanResultMsg{dir: base, err: fmt.Errorf("emptyDirs: %w", err)})
-			continue
-		}
-		if c.opt.Dryrun {
-			c.sender.Send(cleanResultMsg{dir: base, dryrun: true})
 			continue
 		}
 		for _, dir := range dirs {
@@ -428,6 +433,10 @@ func (c CLI) clean(paths []string) {
 			if rel, err := filepath.Rel(path, dir); err == nil && rel != "." {
 				name = filepath.Join(base, rel)
 			}
+			if c.opt.Dryrun {
+				c.sender.Send(cleanResultMsg{dir: name, dryrun: true, empty: true})
+				continue
+			}
 			if err := c.fs.RemoveAll(dir); err != nil {
 				c.sender.Send(cleanResultMsg{dir: name, empty: true, err: err})
 			} else {
@@ -435,7 +444,7 @@ func (c CLI) clean(paths []string) {
 			}
 		}
 		if !removable {
-			c.sender.Send(cleanResultMsg{dir: base, empty: false})
+			c.sender.Send(cleanResultMsg{dir: base, dryrun: c.opt.Dryrun, empty: false})
 		}
 	}
 }
@@ -573,11 +582,70 @@ var junkFiles = map[string]bool{
 	"desktop.ini": true, // Windows Explorer
 }
 
+// pendingMoves records the renames that dry-run would do but has not done.
+type pendingMoves struct {
+	mu   sync.Mutex
+	from map[string]bool // files that would be moved
+	to   []string        // paths they would be moved to
+}
+
+func newPendingMoves() *pendingMoves {
+	return &pendingMoves{from: map[string]bool{}}
+}
+
+// add records a move from src to dst. It does nothing on a nil receiver.
+func (m *pendingMoves) add(src, dst string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.from[absPath(src)] = true
+	m.to = append(m.to, absPath(dst))
+}
+
+// movedAway reports whether the file at path would be moved.
+func (m *pendingMoves) movedAway(path string) bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.from[absPath(path)]
+}
+
+// movedInto reports whether a file would be moved to somewhere under dir.
+func (m *pendingMoves) movedInto(dir string) bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	prefix := absPath(dir) + string(filepath.Separator)
+	for _, to := range m.to {
+		if strings.HasPrefix(to, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func absPath(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return filepath.Clean(path)
+}
+
 // emptyDirs reports whether dir is empty, and returns the empty directories
 // to remove: dir itself if it is empty, or else the outermost empty
 // directories under it. A directory is empty when it has nothing but junk
 // files and empty directories.
-func emptyDirs(dir string) (bool, []string, error) {
+//
+// With moves, it predicts the result after those moves: files that would be
+// moved away count as gone, and a directory that a file would be moved into
+// is not empty.
+func emptyDirs(dir string, moves *pendingMoves) (bool, []string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return false, nil, err
@@ -586,7 +654,7 @@ func emptyDirs(dir string) (bool, []string, error) {
 	var dirs []string
 	for _, entry := range entries {
 		if entry.IsDir() {
-			subEmpty, subDirs, err := emptyDirs(filepath.Join(dir, entry.Name()))
+			subEmpty, subDirs, err := emptyDirs(filepath.Join(dir, entry.Name()), moves)
 			if err != nil {
 				return false, nil, err
 			}
@@ -594,9 +662,12 @@ func emptyDirs(dir string) (bool, []string, error) {
 			dirs = append(dirs, subDirs...)
 			continue
 		}
-		if !junkFiles[entry.Name()] {
+		if !junkFiles[entry.Name()] && !moves.movedAway(filepath.Join(dir, entry.Name())) {
 			empty = false
 		}
+	}
+	if empty && moves.movedInto(dir) {
+		empty = false
 	}
 	if empty {
 		return true, []string{dir}, nil

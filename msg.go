@@ -46,7 +46,12 @@ func (r cleanResultMsg) String() string {
 			r.err.Error())
 	}
 	if r.dryrun {
-		return fmt.Sprintf("%s: %s Would remove if empty",
+		if r.empty {
+			return fmt.Sprintf("%s: %s Would remove because empty",
+				r.dir,
+				dryrunStyle.Render("DRY-RUN"))
+		}
+		return fmt.Sprintf("%s: %s Would not remove because NOT empty",
 			r.dir,
 			dryrunStyle.Render("DRY-RUN"))
 	}
