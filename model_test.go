@@ -14,8 +14,8 @@ type mockResultMsg struct {
 	str  string
 }
 
-func (m mockResultMsg) Path() string  { return m.path }
-func (m mockResultMsg) Err() error    { return m.err }
+func (m mockResultMsg) Path() string   { return m.path }
+func (m mockResultMsg) Err() error     { return m.err }
 func (m mockResultMsg) String() string { return m.str }
 
 func TestReplaceFirstNilOrAppend(t *testing.T) {

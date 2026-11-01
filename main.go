@@ -66,10 +66,10 @@ type FileSystem interface {
 // osFS is the real filesystem implementation.
 type osFS struct{}
 
-func (osFS) Rename(oldpath, newpath string) error          { return os.Rename(oldpath, newpath) }
-func (osFS) MkdirAll(path string, perm os.FileMode) error  { return os.MkdirAll(path, perm) }
-func (osFS) RemoveAll(path string) error                   { return os.RemoveAll(path) }
-func (osFS) Stat(name string) (os.FileInfo, error)         { return os.Stat(name) }
+func (osFS) Rename(oldpath, newpath string) error         { return os.Rename(oldpath, newpath) }
+func (osFS) MkdirAll(path string, perm os.FileMode) error { return os.MkdirAll(path, perm) }
+func (osFS) RemoveAll(path string) error                  { return os.RemoveAll(path) }
+func (osFS) Stat(name string) (os.FileInfo, error)        { return os.Stat(name) }
 
 // exiftoolExtractor is the real ExifExtractor using go-exiftool. It keeps
 // one exiftool process running (stay_open) and reuses it for every file.
@@ -102,9 +102,9 @@ type CLI struct {
 	images []string
 	// exifs has one extractor per worker; images are processed in parallel
 	// by len(exifs) workers.
-	exifs  []ExifExtractor
-	fs     FileSystem
-	paths  *pathReserver
+	exifs []ExifExtractor
+	fs    FileSystem
+	paths *pathReserver
 	// moves records the renames dry-run would do, for clean to predict
 	moves *pendingMoves
 }
@@ -297,9 +297,7 @@ func (c CLI) extractAll() []Photo {
 		photos []Photo
 	)
 	for _, exif := range c.exifs {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for image := range images {
 				if photo, ok := c.extract(exif, image); ok {
 					mu.Lock()
@@ -307,7 +305,7 @@ func (c CLI) extractAll() []Photo {
 					mu.Unlock()
 				}
 			}
-		}()
+		})
 	}
 	for _, image := range c.images {
 		images <- image
@@ -529,7 +527,7 @@ func getExifdata(et *exiftool.Exiftool, path string) (Photo, error) {
 		var fallbackErr error
 		createdAt, fallbackErr = getExifTime(fileInfo, "DateTimeOriginal")
 		if fallbackErr != nil {
-			return photo, fmt.Errorf("error on both SubSecDateTimeOriginal (%v) and DateTimeOriginal: %w", err, fallbackErr)
+			return photo, fmt.Errorf("error on both SubSecDateTimeOriginal (%w) and DateTimeOriginal: %w", err, fallbackErr)
 		}
 	}
 
