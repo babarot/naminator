@@ -41,13 +41,13 @@ func TestDurationString(t *testing.T) {
 
 // mockFS records filesystem calls and can simulate errors.
 type mockFS struct {
-	renamed    map[string]string
-	dirs       []string
-	removed    []string
-	renameErr  error
-	mkdirErr   error
-	removeErr  error
-	statFunc   func(string) (os.FileInfo, error)
+	renamed   map[string]string
+	dirs      []string
+	removed   []string
+	renameErr error
+	mkdirErr  error
+	removeErr error
+	statFunc  func(string) (os.FileInfo, error)
 }
 
 func newMockFS() *mockFS {
@@ -654,7 +654,7 @@ func TestClean(t *testing.T) {
 		if len(msgs) != 1 {
 			t.Fatalf("expected 1 message, got %d", len(msgs))
 		}
-		msg := msgs[0].(cleanResultMsg)
+		msg, _ := msgs[0].(cleanResultMsg)
 		if msg.empty {
 			t.Error("expected empty=false")
 		}
@@ -680,7 +680,7 @@ func TestClean(t *testing.T) {
 		if len(msgs) != 1 {
 			t.Fatalf("expected 1 message, got %d", len(msgs))
 		}
-		msg := msgs[0].(cleanResultMsg)
+		msg, _ := msgs[0].(cleanResultMsg)
 		if !msg.dryrun {
 			t.Error("expected dryrun=true in message")
 		}
@@ -707,7 +707,7 @@ func TestClean(t *testing.T) {
 		if len(msgs) != 1 {
 			t.Fatalf("expected 1 message, got %d", len(msgs))
 		}
-		msg := msgs[0].(cleanResultMsg)
+		msg, _ := msgs[0].(cleanResultMsg)
 		if msg.err == nil || msg.err.Error() != "rm failed" {
 			t.Errorf("expected 'rm failed' error, got %v", msg.err)
 		}
@@ -749,7 +749,7 @@ func TestClean(t *testing.T) {
 
 		var got []string
 		for _, msg := range sender.getMessages() {
-			m := msg.(cleanResultMsg)
+			m, _ := msg.(cleanResultMsg)
 			if m.err != nil {
 				t.Errorf("unexpected error for %s: %v", m.dir, m.err)
 			}
@@ -775,7 +775,7 @@ func TestClean(t *testing.T) {
 		cli.clean([]string{root})
 
 		msgs := sender.getMessages()
-		if len(msgs) != 1 || !msgs[0].(cleanResultMsg).empty {
+		if msg, ok := firstClean(msgs); len(msgs) != 1 || !ok || !msg.empty {
 			t.Fatalf("expected one removed message, got %v", msgs)
 		}
 		if _, err := os.Stat(root); !os.IsNotExist(err) {
@@ -810,7 +810,7 @@ func TestClean(t *testing.T) {
 
 		var got []string
 		for _, msg := range sender.getMessages() {
-			m := msg.(cleanResultMsg)
+			m, _ := msg.(cleanResultMsg)
 			got = append(got, fmt.Sprintf("%s:%v:%v", m.dir, m.dryrun, m.empty))
 		}
 		if want := "DCIM/100MSDCF:true:true,DCIM:true:false"; strings.Join(got, ",") != want {
@@ -997,4 +997,13 @@ func TestWalkDirNonExistent(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for non-existent path")
 	}
+}
+
+// firstClean is the first message, when it is a cleanResultMsg.
+func firstClean(msgs []tea.Msg) (cleanResultMsg, bool) {
+	if len(msgs) == 0 {
+		return cleanResultMsg{}, false
+	}
+	msg, ok := msgs[0].(cleanResultMsg)
+	return msg, ok
 }

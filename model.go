@@ -181,38 +181,38 @@ func (m *model) decideProgress() {
 }
 
 func (m model) View() string {
-	var s string
+	var s strings.Builder
 
 	successes, failures := m.counts()
 
 	if m.quitting {
-		s += "Renaming done. Time: " +
-			duration(time.Since(m.startTime)).String()
-		s += fmt.Sprintf(" (%d OK, %d failed, %d total)", successes, failures, m.total)
+		s.WriteString("Renaming done. Time: " +
+			duration(time.Since(m.startTime)).String())
+		fmt.Fprintf(&s, " (%d OK, %d failed, %d total)", successes, failures, m.total)
 	} else {
-		s += m.spinner.View() + " Processing photos... "
-		s += fmt.Sprintf("(%d/%d)", successes+failures, m.total)
+		s.WriteString(m.spinner.View() + " Processing photos... ")
+		fmt.Fprintf(&s, "(%d/%d)", successes+failures, m.total)
 	}
 
-	s += "\n\n"
+	s.WriteString("\n\n")
 
 	for _, res := range m.results {
 		switch res.(type) {
 		case exifResultMsg, renameResultMsg, cleanResultMsg:
-			s += res.String()
+			s.WriteString(res.String())
 		default:
 			// default is resultMsg (interface)
-			s += dotStyle.Render(strings.Repeat(".", 30))
+			s.WriteString(dotStyle.Render(strings.Repeat(".", 30)))
 		}
-		s += "\n"
+		s.WriteString("\n")
 	}
 
-	s += "\n"
+	s.WriteString("\n")
 
 	if percent := m.percent(); percent < 1 && (m.total > 100 || m.showProgress) {
-		s += m.progress.ViewAs(percent)
-		s += "\n"
+		s.WriteString(m.progress.ViewAs(percent))
+		s.WriteString("\n")
 	}
 
-	return appStyle.Render(s)
+	return appStyle.Render(s.String())
 }

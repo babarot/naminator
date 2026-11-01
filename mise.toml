@@ -1,0 +1,37 @@
+# Tasks for developing naminator: mise tasks lists them, mise run <task> runs one.
+# Go comes from wherever you have it (go.mod sets the minimum), the other
+# tools from [tools] below.
+
+[tools]
+golangci-lint = "2.15.0"
+
+[tasks.build]
+description = "Build ./naminator"
+run = 'go build -ldflags "$(scripts/ldflags.sh)" -trimpath -o naminator .'
+
+[tasks.install]
+description = "Install naminator into $GOBIN (or $GOPATH/bin)"
+run = 'go install -ldflags "$(scripts/ldflags.sh)" .'
+
+[tasks.clean]
+description = "Remove ./naminator and coverage.out"
+run = "rm -f naminator coverage.out"
+
+[tasks.test]
+description = "Check formatting, vet, and run the Go tests with the race detector, writing coverage.out"
+run = '''
+test -z "$(gofmt -l .)" || { gofmt -l .; echo "gofmt: the files above are not formatted"; exit 1; }
+go vet ./...
+go test -race ./... -coverprofile=coverage.out -covermode=atomic
+'''
+
+[tasks.lint]
+description = "Run golangci-lint, and check that go.mod and go.sum are tidy"
+run = '''
+golangci-lint run ./...
+go mod tidy -diff
+'''
+
+[tasks.vuln]
+description = "Check the dependencies and the standard library for known vulnerabilities"
+run = "go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./..."

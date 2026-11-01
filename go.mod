@@ -1,6 +1,6 @@
 module github.com/babarot/naminator
 
-go 1.26.0
+go 1.26.10
 
 require (
 	github.com/barasher/go-exiftool v1.10.0
