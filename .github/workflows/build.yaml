@@ -1,37 +1,46 @@
 name: Go
+
+# On main, Release runs this before it releases
 on:
-  push:
-    branches:
-    - main
   pull_request:
   schedule:
   # Weekly, to catch newly published vulnerabilities in govulncheck
   - cron: '0 0 * * 1'
+  workflow_call:
   workflow_dispatch:
 
 jobs:
   build:
     strategy:
       matrix:
-        go-version: ['stable']
         os: ['ubuntu-latest', 'macos-latest']
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     permissions:
       contents: read
+      # octocov comments the coverage on the pull request, and keeps the
+      # report of main as an artifact to compare the next ones with
+      pull-requests: write
+      actions: write
     steps:
-    - name: Check out code into the Go module directory
+    - name: Checkout
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
-    - name: Install Go
-      if: success()
+    - name: Setup Go
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
-        go-version: ${{ matrix.go-version }}
+        go-version-file: go.mod
         cache: true
+    - name: Setup mise
+      uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      with:
+        version: 2026.9.18
     - name: Run tests
-      run: make test
+      run: mise run test
+    - name: Run octocov
+      if: runner.os == 'Linux'
+      uses: k1LoW/octocov-action@a167dc0dee441b7ffc45e1b862ab55ec0d87f278 # v1.5.2
 
   lint:
     runs-on: ubuntu-latest
@@ -39,18 +48,21 @@ jobs:
     permissions:
       contents: read
     steps:
-    - name: Check out code into the Go module directory
+    - name: Checkout
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
-    - name: Install Go
+    - name: Setup Go
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
-        go-version: stable
-    - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        go-version-file: go.mod
+        cache: true
+    - name: Setup mise
+      uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
       with:
-        version: v2.14.0
+        version: 2026.9.18
+    - name: Run golangci-lint and go mod tidy
+      run: mise run lint
 
   vulncheck:
     runs-on: ubuntu-latest
@@ -58,13 +70,18 @@ jobs:
     permissions:
       contents: read
     steps:
-    - name: Check out code into the Go module directory
+    - name: Checkout
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
-    - name: Install Go
+    - name: Setup Go
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
-        go-version: stable
+        go-version-file: go.mod
+        cache: true
+    - name: Setup mise
+      uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      with:
+        version: 2026.9.18
     - name: Run govulncheck
-      run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+      run: mise run vuln
