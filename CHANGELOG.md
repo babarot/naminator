@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.2.7](https://github.com/babarot/naminator/compare/v0.2.6...v0.2.7) - 2026-11-03
+
+### Improvements
+- Run the tasks with mise, lint, and test before releasing by @babarot in https://github.com/babarot/naminator/pull/45
+
 ## [v0.2.6](https://github.com/babarot/naminator/compare/v0.2.5...v0.2.6) - 2026-10-10
 
 ### Bug fixes
