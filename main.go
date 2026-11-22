@@ -109,6 +109,9 @@ type CLI struct {
 	paths *pathReserver
 	// moves records the renames dry-run would do, for clean to predict
 	moves *pendingMoves
+	// namer gives each photo its path; nil names photos by the flags
+	// (legacyNamer)
+	namer *namer
 	// base and into are where rename targets are shown from (phaseStartMsg)
 	base string
 	into bool
@@ -242,6 +245,7 @@ func runMain() error {
 		fs:     osFS{},
 		paths:  newPathReserver(),
 		moves:  newPendingMoves(),
+		namer:  legacyNamer(opt),
 		base:   base,
 		into:   into,
 	}
@@ -470,35 +474,10 @@ func (c CLI) renameAndReport(photo Photo) {
 	}
 }
 
-// buildNewPath computes the destination path for a photo based on options.
-// This is a pure function with no side effects.
+// buildNewPath computes the destination path for a photo based on options,
+// as the flags -t, -e, -E and -d name photos (see legacyNamer).
 func buildNewPath(photo Photo, opt Option) string {
-	dest := opt.DestDir
-	if dest == "" {
-		dest = photo.Dir
-		if opt.GroupByDate || opt.GroupByExt {
-			dest = filepath.Dir(dest)
-		}
-	}
-
-	if opt.GroupByExt && opt.GroupByDate {
-		if opt.GroupExtFirst {
-			dest = filepath.Join(dest, photo.Extension)
-			dest = filepath.Join(dest, photo.CreatedAt.Format("2006-01-02"))
-		} else {
-			dest = filepath.Join(dest, photo.CreatedAt.Format("2006-01-02"))
-			dest = filepath.Join(dest, photo.Extension)
-		}
-	} else if opt.GroupByDate {
-		dest = filepath.Join(dest, photo.CreatedAt.Format("2006-01-02"))
-	} else if opt.GroupByExt {
-		dest = filepath.Join(dest, photo.Extension)
-	}
-
-	return filepath.Join(dest, fmt.Sprintf("%s.%s",
-		photo.CreatedAt.Format("2006-01-02_15-04-05"),
-		photo.Extension,
-	))
+	return legacyNamer(opt).target(photo)
 }
 
 // pathReserver hands out destination paths so that no two photos in a run,
@@ -544,8 +523,16 @@ func isOtherFile(fsys FileSystem, path, src string) bool {
 	return err != nil || !os.SameFile(fi, srcFi)
 }
 
+// target is the path photo is to be renamed to, before it is reserved.
+func (c CLI) target(photo Photo) string {
+	if c.namer == nil {
+		return buildNewPath(photo, c.opt)
+	}
+	return c.namer.target(photo)
+}
+
 func (c CLI) rename(photo Photo) (Photo, bool, error) {
-	photo.RenamedPath = c.paths.reserve(c.fs, photo.Path, buildNewPath(photo, c.opt))
+	photo.RenamedPath = c.paths.reserve(c.fs, photo.Path, c.target(photo))
 	if c.opt.Dryrun {
 		c.moves.add(photo.Path, photo.RenamedPath)
 		return photo, true, nil
@@ -608,6 +595,8 @@ type Photo struct {
 	RenamedPath string
 	Dir         string
 	Extension   string
+	// Camera is the model of the camera, from EXIF (empty if unknown)
+	Camera string
 	// CreatedAt is the clock time where the photo was taken (see parseExifTime)
 	CreatedAt time.Time
 }
@@ -659,11 +648,15 @@ func getExifdata(et *exiftool.Exiftool, path string) (Photo, error) {
 		return photo, fmt.Errorf("error on 'FileTypeExtension': %w", err)
 	}
 
+	// The model is optional: only {camera} uses it
+	camera, _ := fileInfo.GetString("Model")
+
 	return Photo{
 		Name:      filename,
 		Path:      sourceFile,
 		Dir:       filepath.Dir(path),
 		Extension: ext,
+		Camera:    strings.TrimSpace(camera),
 		CreatedAt: createdAt,
 	}, nil
 }
