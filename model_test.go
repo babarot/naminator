@@ -1,187 +1,217 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 )
 
-// mockResultMsg implements resultMsg for testing
-type mockResultMsg struct {
-	path string
-	err  error
-	str  string
+// newTestModel returns a model whose prints are held in its queue: with
+// printing set, flush sends nothing, so a test reads what would be printed.
+func newTestModel(first phaseStartMsg, height int) *model {
+	m := newModel(first, nil)
+	m.width, m.height = 100, height
+	m.now = func() time.Time { return t0 }
+	m.phase.start = t0
+	m.printing = true
+	return &m
 }
 
-func (m mockResultMsg) Path() string   { return m.path }
-func (m mockResultMsg) Err() error     { return m.err }
-func (m mockResultMsg) String() string { return m.str }
-
-func TestReplaceFirstNilOrAppend(t *testing.T) {
-	t.Run("replaces first nil", func(t *testing.T) {
-		m := &model{
-			results: []resultMsg{nil, nil, nil},
-			height:  3,
+func (m *model) send(msgs ...tea.Msg) {
+	for _, msg := range msgs {
+		next, _ := m.Update(msg)
+		nm, ok := next.(model)
+		if !ok {
+			panic(fmt.Sprintf("Update returned %T", next))
 		}
-		msg := mockResultMsg{path: "a.jpg", str: "a"}
-		m.replaceFirstNilOrAppend(msg)
-
-		if m.results[0] == nil {
-			t.Error("first element should not be nil")
-		}
-		if m.results[0].Path() != "a.jpg" {
-			t.Errorf("got path %q, want %q", m.results[0].Path(), "a.jpg")
-		}
-		// second and third should still be nil
-		if m.results[1] != nil || m.results[2] != nil {
-			t.Error("only first nil should be replaced")
-		}
-	})
-
-	t.Run("replaces second nil when first is filled", func(t *testing.T) {
-		first := mockResultMsg{path: "a.jpg", str: "a"}
-		m := &model{
-			results: []resultMsg{first, nil, nil},
-			height:  3,
-		}
-		msg := mockResultMsg{path: "b.jpg", str: "b"}
-		m.replaceFirstNilOrAppend(msg)
-
-		if m.results[1] == nil || m.results[1].Path() != "b.jpg" {
-			t.Error("second element should be b.jpg")
-		}
-	})
-
-	t.Run("shifts and appends when all filled", func(t *testing.T) {
-		m := &model{
-			results: []resultMsg{
-				mockResultMsg{path: "a.jpg"},
-				mockResultMsg{path: "b.jpg"},
-				mockResultMsg{path: "c.jpg"},
-			},
-			height: 3,
-		}
-		msg := mockResultMsg{path: "d.jpg"}
-		m.replaceFirstNilOrAppend(msg)
-
-		if len(m.results) != 3 {
-			t.Fatalf("len = %d, want 3", len(m.results))
-		}
-		if m.results[0].Path() != "b.jpg" {
-			t.Errorf("first = %q, want b.jpg", m.results[0].Path())
-		}
-		if m.results[2].Path() != "d.jpg" {
-			t.Errorf("last = %q, want d.jpg", m.results[2].Path())
-		}
-	})
+		*m = nm
+	}
 }
 
-func TestTrimNonErrorMessageAndAppend(t *testing.T) {
-	t.Run("removes first non-error and appends", func(t *testing.T) {
-		m := &model{
-			results: []resultMsg{
-				mockResultMsg{path: "a.jpg"},
-				mockResultMsg{path: "b.jpg", err: errors.New("fail")},
-				mockResultMsg{path: "c.jpg"},
-			},
-			height: 3,
-		}
-		msg := mockResultMsg{path: "d.jpg"}
-		m.trimNonErrorMessageAndAppend(msg)
-
-		// "a.jpg" (non-error) should be removed, error "b.jpg" retained
-		paths := make([]string, len(m.results))
-		for i, r := range m.results {
-			paths[i] = r.Path()
-		}
-		if len(m.results) != 3 {
-			t.Fatalf("len = %d, want 3, got %v", len(m.results), paths)
-		}
-		// b.jpg (error) should be retained
-		hasError := false
-		for _, r := range m.results {
-			if r.Path() == "b.jpg" {
-				hasError = true
-			}
-		}
-		if !hasError {
-			t.Errorf("error message b.jpg should be retained, got %v", paths)
-		}
-	})
-
-	t.Run("removes nil first", func(t *testing.T) {
-		m := &model{
-			results: []resultMsg{
-				nil,
-				mockResultMsg{path: "a.jpg", err: errors.New("fail")},
-			},
-			height: 3,
-		}
-		msg := mockResultMsg{path: "b.jpg"}
-		m.trimNonErrorMessageAndAppend(msg)
-
-		// nil should be removed
-		for _, r := range m.results {
-			if r == nil {
-				t.Error("nil should have been removed")
-			}
-		}
-	})
-
-	t.Run("respects height limit", func(t *testing.T) {
-		m := &model{
-			results: []resultMsg{
-				mockResultMsg{path: "a.jpg", err: errors.New("e1")},
-				mockResultMsg{path: "b.jpg", err: errors.New("e2")},
-				mockResultMsg{path: "c.jpg", err: errors.New("e3")},
-			},
-			height: 3,
-		}
-		msg := mockResultMsg{path: "d.jpg", err: errors.New("e4")}
-		m.trimNonErrorMessageAndAppend(msg)
-
-		if len(m.results) > m.height {
-			t.Errorf("len = %d, should not exceed height %d", len(m.results), m.height)
-		}
-	})
+func (m *model) printed() string {
+	return plain(strings.Join(m.queue, "\n"))
 }
 
-func TestDecideProgress(t *testing.T) {
-	newTestModel := func(done int, elapsed time.Duration) model {
-		m := model{files: map[string]state{}, total: 100, startTime: time.Now().Add(-elapsed)}
-		for i := range done {
-			m.files[fmt.Sprint(i)] = succeeded
+func photoKeys(n int) []string {
+	var keys []string
+	for i := range n {
+		keys = append(keys, fmt.Sprintf("/p/IMG_%04d.HEIC", i))
+	}
+	return keys
+}
+
+func TestModelCompactRun(t *testing.T) {
+	keys := photoKeys(20)
+	m := newTestModel(phaseStartMsg{kind: phaseExif, keys: keys, limit: 4}, 30)
+	if title := m.startCompact(); title != "Reading EXIF of 20 photos\n" {
+		t.Fatalf("title to print first = %q", title)
+	}
+	for i, k := range keys {
+		var err error
+		if i == 3 {
+			err = errors.New("File format error\nsecond line")
 		}
-		return m
+		m.send(exifStartMsg{image: k}, exifResultMsg{image: k, photo: Photo{Path: k}, err: err})
+	}
+	// only the failure is printed while reading; the rest is counted
+	if got := m.printed(); !strings.Contains(got, "✗ IMG_0003.HEIC") || strings.Contains(got, "IMG_0004") {
+		t.Errorf("printed while reading:\n%s", got)
+	}
+	if view := plain(m.View().Content); !strings.Contains(view, "19 read") || !strings.Contains(view, "20/20 photos") {
+		t.Errorf("view:\n%s", view)
 	}
 
-	t.Run("undecided before 3 seconds", func(t *testing.T) {
-		m := newTestModel(0, time.Second)
-		m.decideProgress()
-		if m.showProgressSet {
-			t.Error("should not decide before 3 seconds")
+	renameKeys := append(append([]string{}, keys[:3]...), keys[4:]...)
+	m.send(phaseStartMsg{kind: phaseRename, keys: renameKeys})
+	for i, k := range renameKeys {
+		to := fmt.Sprintf("/p/2026-10-03_14-00-%02d.heic", i)
+		if i == 0 {
+			to = k // already named
 		}
-	})
+		m.send(renameResultMsg{photo: Photo{Name: k[3:], Path: k, RenamedPath: to}})
+	}
+	m.send(finishMsg{})
 
-	t.Run("shown when less than a quarter is done", func(t *testing.T) {
-		m := newTestModel(10, 4*time.Second)
-		m.decideProgress()
-		if !m.showProgressSet || !m.showProgress {
-			t.Errorf("showProgressSet=%v showProgress=%v, want true, true", m.showProgressSet, m.showProgress)
+	got := m.printed()
+	for _, want := range []string{
+		"  ✓ 19 read\n\n✗ Read EXIF of 20 photos in 0.0s, 1 failed\n\nRenaming 19 photos\n",
+		"  ✓ IMG_0001.HEIC  → /p/2026-10-03_14-00-01.heic\n",
+		"  ✓ 1 already named\n\n✓ Renamed 18 photos in 0.0s, 1 already named\n",
+		"\n\n  IMG_0003.HEIC:\n    File format error\n    second line\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("printed lacks %q:\n%s", want, got)
 		}
-	})
+	}
+	if strings.Count(got, "IMG_0001.HEIC  →") != 1 {
+		t.Errorf("a row should be printed once:\n%s", got)
+	}
+	if !m.finished || m.View().Content != "" {
+		t.Error("the view should be empty once finished")
+	}
+}
 
-	t.Run("hidden when a quarter or more is done, and kept", func(t *testing.T) {
-		m := newTestModel(50, 4*time.Second)
-		m.decideProgress()
-		if !m.showProgressSet || m.showProgress {
-			t.Errorf("showProgressSet=%v showProgress=%v, want true, false", m.showProgressSet, m.showProgress)
+func TestModelFullView(t *testing.T) {
+	keys := photoKeys(3)
+	m := newTestModel(phaseStartMsg{kind: phaseExif, keys: keys, limit: 3}, 30)
+	if title := m.startCompact(); title != "" {
+		t.Fatalf("few rows should start whole, got title %q", title)
+	}
+	m.send(exifStartMsg{image: keys[0]})
+	view := plain(m.View().Content)
+	for _, want := range []string{"Reading EXIF of 3 photos", "0/3 photos", "IMG_0000.HEIC", "exiftool", "queued", "ctrl+c to cancel"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view lacks %q:\n%s", want, view)
 		}
-		m.files = map[string]state{}
-		m.decideProgress()
-		if m.showProgress {
-			t.Error("the decision should not change once made")
+	}
+	if len(m.queue) != 0 {
+		t.Errorf("nothing should be printed while drawn whole, got %q", m.queue)
+	}
+	for _, k := range keys {
+		m.send(exifResultMsg{image: k, photo: Photo{Path: k}})
+	}
+	m.send(phaseStartMsg{kind: phaseRename, keys: keys})
+	// the whole view of the phase is kept above, its heading now the outcome
+	got := m.printed()
+	if !strings.HasPrefix(got, "✓ Read EXIF of 3 photos in 0.0s\n\n  ✓ IMG_0000.HEIC") || strings.Contains(got, "ctrl+c") {
+		t.Errorf("printed:\n%s", got)
+	}
+}
+
+func TestModelCtrlC(t *testing.T) {
+	keys := photoKeys(20)
+	canceled := false
+	m := newTestModel(phaseStartMsg{kind: phaseExif, keys: keys, limit: 2}, 30)
+	m.cancel = func() { canceled = true }
+	m.startCompact()
+	m.send(exifStartMsg{image: keys[0]}, exifStartMsg{image: keys[1]}, exifResultMsg{image: keys[0], photo: Photo{Path: keys[0]}})
+	m.send(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	if !canceled {
+		t.Fatal("Ctrl+C should cancel the work")
+	}
+	// the running exiftool still reports; it is not shown
+	m.send(exifResultMsg{image: keys[1], err: errors.New("late")}, finishMsg{})
+	got := m.printed()
+	if !strings.Contains(got, "✗ IMG_0001.HEIC (canceled)") || !strings.Contains(got, "✗ Reading EXIF of 20 photos (canceled)") {
+		t.Errorf("printed:\n%s", got)
+	}
+	if strings.Contains(got, "late") {
+		t.Errorf("a result after Ctrl+C should not be reported:\n%s", got)
+	}
+}
+
+func TestModelInterrupt(t *testing.T) {
+	keys := photoKeys(3)
+	canceled := false
+	m := newTestModel(phaseStartMsg{kind: phaseExif, keys: keys, limit: 1}, 30)
+	m.cancel = func() { canceled = true }
+	m.send(exifStartMsg{image: keys[0]}, interruptMsg{}, finishMsg{})
+	if !canceled {
+		t.Fatal("a signal should cancel the work")
+	}
+	if got := m.printed(); !strings.Contains(got, "✗ IMG_0000.HEIC (canceled)") || !strings.Contains(got, "(canceled)") {
+		t.Errorf("printed:\n%s", got)
+	}
+}
+
+func TestModelFlush(t *testing.T) {
+	m := newTestModel(phaseStartMsg{kind: phaseExif}, 30)
+	m.printing = false
+	m.queue = []string{"a", "b"}
+	if cmd := m.flush(); cmd == nil || !m.printing || len(m.queue) != 0 {
+		t.Fatalf("flush should send the batch: cmd=%v printing=%v queue=%v", cmd, m.printing, m.queue)
+	}
+	m.queue = []string{"c"}
+	if cmd := m.flush(); cmd != nil {
+		t.Error("a second batch should wait for the first")
+	}
+	m.printing = false
+	m.queue = nil
+	m.finished = true
+	if cmd := m.flush(); cmd == nil {
+		t.Fatal("should quit once finished and printed")
+	} else if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Errorf("cmd() = %T, want tea.QuitMsg", cmd())
+	}
+}
+
+func TestPlainSender(t *testing.T) {
+	var buf bytes.Buffer
+	keys := photoKeys(3)
+	s := newPlainSender(&buf, phaseStartMsg{kind: phaseExif, keys: keys})
+	for i, k := range keys {
+		var err error
+		if i == 1 {
+			err = errors.New("bad")
 		}
-	})
+		s.Send(exifStartMsg{image: k})
+		s.Send(exifResultMsg{image: k, photo: Photo{Path: k}, err: err})
+	}
+	s.Send(phaseStartMsg{kind: phaseRename, keys: []string{keys[0]}, dry: true})
+	s.Send(renameResultMsg{photo: Photo{Name: "IMG_0000.HEIC", Path: keys[0], RenamedPath: "/p/x.heic"}, dryrun: true})
+	s.Send(finishMsg{})
+
+	got := plain(buf.String())
+	want := strings.Join([]string{
+		"Reading EXIF of 3 photos",
+		"  ✗ IMG_0001.HEIC   0.0s  bad",
+		"✗ Read EXIF of 3 photos in 0.0s, 1 failed",
+		"",
+		"Planning 1 rename (dry run)",
+		"  ~ IMG_0000.HEIC  → /p/x.heic",
+		"✓ Would rename 1 photo (dry run)",
+		"",
+		"  IMG_0001.HEIC:",
+		"    bad",
+		"",
+		"",
+	}, "\n")
+	if got != want {
+		t.Errorf("output:\n%s\nwant:\n%s", got, want)
+	}
 }

@@ -7,15 +7,17 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/barasher/go-exiftool"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/jessevdk/go-flags"
 	"github.com/mattn/go-isatty"
@@ -107,10 +109,22 @@ type CLI struct {
 	paths *pathReserver
 	// moves records the renames dry-run would do, for clean to predict
 	moves *pendingMoves
+	// base and into are where rename targets are shown from (phaseStartMsg)
+	base string
+	into bool
+	// canceled is closed when the user stops the run (Ctrl+C)
+	canceled <-chan struct{}
+	cancel   func()
 }
+
+// errCanceled is returned when the user stopped the run.
+var errCanceled = errors.New("canceled")
 
 func main() {
 	if err := runMain(); err != nil {
+		if errors.Is(err, errCanceled) {
+			os.Exit(130)
+		}
 		fmt.Fprintf(os.Stderr, "%s: %v\n", appName, err)
 		os.Exit(1)
 	}
@@ -215,7 +229,7 @@ func runMain() error {
 		exifs = append(exifs, e)
 	}
 
-	p := tea.NewProgram(newModel(len(images)))
+	base, into := displayBase(args, opt)
 	cli := CLI{
 		args: args,
 		opt:  opt,
@@ -223,15 +237,33 @@ func runMain() error {
 			logFile,
 			&slog.HandlerOptions{Level: slog.LevelDebug}),
 		),
-		p:      p,
-		sender: p,
 		images: images,
 		exifs:  exifs,
 		fs:     osFS{},
 		paths:  newPathReserver(),
 		moves:  newPendingMoves(),
+		base:   base,
+		into:   into,
+	}
+	first := phaseStartMsg{kind: phaseExif, keys: images, limit: len(exifs)}
+
+	if !isatty.IsTerminal(os.Stdout.Fd()) {
+		disableStyles()
+		cli.sender = newPlainSender(os.Stdout, first)
+		return cli.run()
 	}
 
+	canceled := make(chan struct{})
+	var once sync.Once
+	cancel := func() { once.Do(func() { close(canceled) }) }
+	model := newModel(first, cancel)
+	if title := model.startCompact(); title != "" {
+		fmt.Println(title)
+	}
+	cli.p = tea.NewProgram(model, tea.WithoutSignalHandler())
+	cli.sender = cli.p
+	cli.canceled = canceled
+	cli.cancel = cancel
 	return cli.run()
 }
 
@@ -242,26 +274,93 @@ func (d duration) String() string {
 	return fmt.Sprintf("%.2fs", sec)
 }
 
+// displayBase returns where rename targets are shown from: the destination
+// directory, or else the directory given when it is the only argument.
+func displayBase(args []string, opt Option) (base string, into bool) {
+	if opt.DestDir != "" {
+		return opt.DestDir, true
+	}
+	if len(args) == 1 {
+		if fi, err := os.Stat(args[0]); err == nil && fi.IsDir() {
+			return args[0], false
+		}
+	}
+	return "", false
+}
+
 func (c CLI) run() error {
 	c.logger.Debug("start")
 	defer c.logger.Debug("end")
 
-	go func() {
+	work := func() {
 		// Process all photos, then remove empty directories
 		c.processAll()
-		c.clean(c.args)
+		if c.opt.Clean && !c.isCanceled() {
+			c.sender.Send(phaseStartMsg{kind: phaseClean, dry: c.opt.Dryrun})
+			c.clean(c.args)
+		}
 		// Signal completion to stop UI rendering
 		c.sender.Send(finishMsg{})
-	}()
-
-	// No need to wait for the goroutine explicitly, as c.p.Run() blocks
-	// until it receives finishMsg{}. The cleanup and message sending
-	// happen in a separate goroutine, ensuring that Run() eventually exits.
-	if _, err := c.p.Run(); err != nil {
-		return err
 	}
 
+	if c.p == nil {
+		work()
+		return nil
+	}
+
+	// c.p.Run() blocks until the model quits, which it does once it has
+	// received finishMsg{} and printed everything.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		work()
+	}()
+	// A signal stops the run as Ctrl+C does. After the first, the default
+	// handling is back, so a second one ends the process at once.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sig)
+	go func() {
+		select {
+		case <-sig:
+			signal.Stop(sig)
+			c.p.Send(interruptMsg{})
+		case <-done:
+		}
+	}()
+	_, err := c.p.Run()
+	if err != nil {
+		// The program failed: stop the work too.
+		c.cancel()
+	}
+	// Wait for the work, so that no rename starts after this and the
+	// exiftool processes are closed only once nothing uses them. Sends to
+	// the ended program return at once.
+	<-done
+	// FIXME(bubbletea): drain the terminal's replies to the queries
+	// bubbletea v2 sends, which it fails to read during shutdown; they
+	// would leak into the shell. Only a terminal replies: draining
+	// anything else (</dev/null, a pipe) would wait forever on Linux.
+	if isatty.IsTerminal(os.Stdin.Fd()) {
+		drainStdinAfterBubbletea()
+	}
+	if err != nil {
+		return err
+	}
+	if c.isCanceled() {
+		return errCanceled
+	}
 	return nil
+}
+
+// isCanceled reports whether the user stopped the run.
+func (c CLI) isCanceled() bool {
+	select {
+	case <-c.canceled:
+		return true
+	default:
+		return false
+	}
 }
 
 // processAll processes c.images and returns when all of them are done. It
@@ -269,6 +368,9 @@ func (c CLI) run() error {
 // photos in the order they were taken.
 func (c CLI) processAll() {
 	photos := c.extractAll()
+	if c.isCanceled() {
+		return
+	}
 
 	// Rename in the order the photos were taken, so that photos taken in the
 	// same second get _1, _2, ... in that order, and the files of one shot
@@ -282,7 +384,16 @@ func (c CLI) processAll() {
 		}
 		return strings.Compare(a.Path, b.Path)
 	})
+	keys := make([]string, len(photos))
+	for i, photo := range photos {
+		keys[i] = photo.Path
+	}
+	c.sender.Send(phaseStartMsg{kind: phaseRename, keys: keys, base: c.base, into: c.into, dry: c.opt.Dryrun})
 	for _, photo := range photos {
+		// Stop between renames: the one in hand is done whole
+		if c.isCanceled() {
+			return
+		}
 		c.renameAndReport(photo)
 	}
 }
@@ -307,8 +418,13 @@ func (c CLI) extractAll() []Photo {
 			}
 		})
 	}
+feed:
 	for _, image := range c.images {
-		images <- image
+		select {
+		case images <- image:
+		case <-c.canceled:
+			break feed
+		}
 	}
 	close(images)
 	wg.Wait()
@@ -316,9 +432,11 @@ func (c CLI) extractAll() []Photo {
 }
 
 func (c CLI) extract(exif ExifExtractor, image string) (Photo, bool) {
+	c.sender.Send(exifStartMsg{image: image})
 	startTime := time.Now()
 	photo, err := exif.Extract(image)
 	c.sender.Send(exifResultMsg{
+		image:    image,
 		photo:    photo,
 		duration: duration(time.Since(startTime)),
 		err:      err,
