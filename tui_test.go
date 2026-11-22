@@ -1,0 +1,315 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+)
+
+// newTestTUI returns a screen over n photos in card/, two of them taken in
+// the same second, none read yet.
+func newTestTUI(t *testing.T, n int) (tuiModel, []Photo) {
+	t.Helper()
+	var images []string
+	var photos []Photo
+	at := time.Date(2026, 10, 4, 14, 22, 0, 0, time.UTC)
+	for i := range n {
+		path := filepath.Join("card", fmt.Sprintf("DSC%05d.JPG", i))
+		images = append(images, path)
+		taken := at.Add(time.Duration(i) * time.Second)
+		if i == 2 {
+			taken = at.Add(time.Second) // the same second as photo 1
+		}
+		photos = append(photos, Photo{Name: filepath.Base(path), Path: path, Dir: "card", Extension: "jpg", CreatedAt: taken})
+	}
+	cfg := config{}
+	m := newTUIModel([]string{"card"}, images, presets[0].format, "", false, cfg.allPresets(), osFS{}, filepath.Join(t.TempDir(), "config.yaml"), nil)
+	m.width, m.height = 100, 30
+	return m, photos
+}
+
+func (m tuiModel) send(t *testing.T, msgs ...tea.Msg) tuiModel {
+	t.Helper()
+	for _, msg := range msgs {
+		next, _ := m.Update(msg)
+		nm, ok := next.(tuiModel)
+		if !ok {
+			t.Fatalf("Update returned %T", next)
+		}
+		m = nm
+	}
+	return m
+}
+
+func keys(s ...string) []tea.Msg {
+	var out []tea.Msg
+	for _, k := range s {
+		switch k {
+		case "enter":
+			out = append(out, tea.KeyPressMsg{Code: tea.KeyEnter})
+		case "esc":
+			out = append(out, tea.KeyPressMsg{Code: tea.KeyEscape})
+		case "tab":
+			out = append(out, tea.KeyPressMsg{Code: tea.KeyTab})
+		case "backspace":
+			out = append(out, tea.KeyPressMsg{Code: tea.KeyBackspace})
+		case "ctrl+c":
+			out = append(out, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+		default:
+			for _, r := range k {
+				out = append(out, tea.KeyPressMsg{Code: r, Text: string(r)})
+			}
+		}
+	}
+	return out
+}
+
+func readAll(photos []Photo) []tea.Msg {
+	var out []tea.Msg
+	for _, p := range photos {
+		out = append(out, exifResultMsg{image: p.Path, photo: p})
+	}
+	return out
+}
+
+func TestTUIPlan(t *testing.T) {
+	m, photos := newTestTUI(t, 4)
+	m = m.send(t, readAll(photos[:3])...)
+	if m.nRead != 3 || m.rows[3].read {
+		t.Fatalf("read %d", m.nRead)
+	}
+	// in place; the photo of the same second gets _1, in the order taken
+	if got := m.rows[1].target; got != "card/2026-10-04_14-22-01.jpg" {
+		t.Errorf("row 1 = %q", got)
+	}
+	if m.rows[2].target != "card/2026-10-04_14-22-01_1.jpg" || m.rows[2].suffix != "_1" {
+		t.Errorf("row 2 = %q (suffix %q)", m.rows[2].target, m.rows[2].suffix)
+	}
+	// a format that cannot be used stops the plan, with what to fix
+	m.setFormat("{date}/{nope}")
+	if m.tplErr == "" || !strings.Contains(strings.Join(m.lines(time.Now()), "\n"), "unknown placeholder {nope}") {
+		t.Errorf("tplErr = %q", m.tplErr)
+	}
+	m.setFormat("{ext}/{date}/{date}_{time}")
+	if got := m.rows[0].target; got != "jpg/2026-10-04/2026-10-04_14-22-00.jpg" {
+		t.Errorf("row 0 = %q", got)
+	}
+	// a photo without a shooting time is skipped
+	m = m.send(t, exifResultMsg{image: photos[3].Path, photo: Photo{Path: photos[3].Path}, err: errors.New("no date")})
+	if !strings.Contains(m.countLine(), "1 without a shooting time") {
+		t.Errorf("count line = %q", ansi.Strip(m.countLine()))
+	}
+}
+
+func TestTUIModes(t *testing.T) {
+	m, photos := newTestTUI(t, 3)
+	m = m.send(t, readAll(photos)...)
+
+	// normal mode: the keys move in the list, and do not edit
+	m = m.send(t, keys("j", "j", "k")...)
+	if m.sel != 1 || m.format != presets[0].format {
+		t.Fatalf("sel = %d, format = %q", m.sel, m.format)
+	}
+	m = m.send(t, keys("G")...)
+	if m.sel != 2 {
+		t.Errorf("G: sel = %d", m.sel)
+	}
+	// insert mode: the keys edit the format, at its end with a
+	m = m.send(t, keys("a", "_{orig}")...)
+	if !m.insert || m.format != presets[0].format+"_{orig}" {
+		t.Fatalf("insert = %v, format = %q", m.insert, m.format)
+	}
+	m = m.send(t, keys("backspace")...)
+	if m.format != presets[0].format+"_{orig" || m.tplErr == "" {
+		t.Errorf("format = %q, tplErr = %q", m.format, m.tplErr)
+	}
+	// enter only leaves insert mode: it never starts a rename
+	m = m.send(t, keys("}", "enter")...)
+	if m.insert || m.confirm {
+		t.Errorf("insert = %v, confirm = %v", m.insert, m.confirm)
+	}
+	// esc leaves too
+	m = m.send(t, keys("i", "esc")...)
+	if m.insert {
+		t.Error("esc should leave insert mode")
+	}
+}
+
+func TestTUIPresets(t *testing.T) {
+	m, _ := newTestTUI(t, 1)
+	m = m.send(t, keys("tab")...)
+	if m.format != presets[1].format || m.presetName() != presets[1].name {
+		t.Errorf("tab: %q (%s)", m.format, m.presetName())
+	}
+	m = m.send(t, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if m.format != presets[len(presets)-1].format {
+		t.Errorf("shift+tab twice: %q", m.format)
+	}
+	// from a format of one's own, the first preset
+	m.setFormat("{date}")
+	if m.presetName() != "custom" {
+		t.Errorf("name = %q", m.presetName())
+	}
+	m = m.send(t, keys("tab")...)
+	if m.format != presets[0].format {
+		t.Errorf("tab from custom: %q", m.format)
+	}
+}
+
+func TestTUIConfirm(t *testing.T) {
+	m, photos := newTestTUI(t, 3)
+	decided := make(chan tuiDecision, 1)
+	m.decided = decided
+
+	// not before every photo is read
+	m = m.send(t, readAll(photos[:2])...)
+	m = m.send(t, keys("enter")...)
+	if m.confirm {
+		t.Fatal("enter should wait for EXIF")
+	}
+	m = m.send(t, readAll(photos[2:])...)
+	// n gives up the confirmation
+	m = m.send(t, keys("enter", "n")...)
+	if m.confirm || m.result != tuiRunning {
+		t.Fatalf("confirm = %v, result = %v", m.confirm, m.result)
+	}
+	// y confirms; the display takes over after a frame, and only then is
+	// the work told, so that the renames reach the display
+	m = m.send(t, keys("enter", "y")...)
+	if m.result != tuiConfirmed || len(decided) != 0 {
+		t.Fatalf("result = %v, decided %d", m.result, len(decided))
+	}
+	if m.View().Content != "" {
+		t.Error("the screen should be gone before the display takes over")
+	}
+	// while it waits, nothing changes the format confirmed
+	m = m.send(t, keys("tab", "i", "x")...)
+	if m.format != presets[0].format || m.insert {
+		t.Fatalf("format = %q, insert = %v after the confirmation", m.format, m.insert)
+	}
+	m = m.send(t, handoverMsg{})
+	if m.run == nil || len(decided) != 1 {
+		t.Fatalf("run = %v, decided %d", m.run, len(decided))
+	}
+	if d := <-decided; d.format != presets[0].format {
+		t.Errorf("decided %+v", d)
+	}
+}
+
+// Ctrl+C while the display is about to take over gives up, and tells the
+// work so.
+func TestTUICancelAfterConfirm(t *testing.T) {
+	m, photos := newTestTUI(t, 1)
+	decided := make(chan tuiDecision, 1)
+	m.decided = decided
+	m = m.send(t, readAll(photos)...)
+	m = m.send(t, keys("enter", "y", "ctrl+c")...)
+	m = m.send(t, handoverMsg{})
+	if m.result != tuiCanceled || m.run != nil || len(decided) != 1 {
+		t.Fatalf("result = %v, run = %v, decided %d", m.result, m.run, len(decided))
+	}
+	if d := <-decided; d.result != tuiCanceled {
+		t.Errorf("decided %+v", d)
+	}
+}
+
+func TestTUIQuit(t *testing.T) {
+	for _, tt := range []struct {
+		key  string
+		want tuiResult
+	}{{"q", tuiQuit}, {"ctrl+c", tuiCanceled}} {
+		m, _ := newTestTUI(t, 2)
+		canceled := false
+		m.cancel = func() { canceled = true }
+		decided := make(chan tuiDecision, 1)
+		m.decided = decided
+		m = m.send(t, keys(tt.key)...)
+		if m.result != tt.want || !canceled || len(decided) != 1 {
+			t.Errorf("%s: result = %v, canceled = %v, decided %d", tt.key, m.result, canceled, len(decided))
+		}
+	}
+	// a signal is Ctrl+C
+	m, _ := newTestTUI(t, 1)
+	if m = m.send(t, interruptMsg{}); m.result != tuiCanceled {
+		t.Errorf("interrupt: %v", m.result)
+	}
+}
+
+func TestTUIView(t *testing.T) {
+	m, photos := newTestTUI(t, 40)
+	m = m.send(t, readAll(photos[:20])...)
+	for _, size := range [][2]int{{100, 30}, {60, 14}, {140, 50}} {
+		m.width, m.height = size[0], size[1]
+		for _, insert := range []bool{false, true} {
+			m.insert = insert
+			lines := m.lines(time.Now())
+			if len(lines) > m.viewHeight() || len(lines)+1 > max(size[1], 13) {
+				t.Errorf("%v insert=%v: %d lines", size, insert, len(lines))
+			}
+			for _, l := range lines {
+				if w := ansi.StringWidth(l); w > size[0] {
+					t.Errorf("%v: a line of %d cells: %q", size, w, ansi.Strip(l))
+				}
+			}
+		}
+	}
+}
+
+func TestSaveFormat(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "naminator", "config.yaml")
+	if err := saveFormat(path, "{ext}/{date}"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "format: \"{ext}/{date}\"\n" {
+		t.Errorf("new file = %q", b)
+	}
+	// the format line is replaced; comments and the rest are kept
+	if err := os.WriteFile(path, []byte("# mine\nclean: true\nformat: \"{date}\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveFormat(path, "{year}/{date}"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(path)
+	if string(b) != "# mine\nclean: true\nformat: \"{year}/{date}\"\n" {
+		t.Errorf("replaced = %q", b)
+	}
+	if c, err := loadConfig(path); err != nil || c.Format != "{year}/{date}" || !c.Clean {
+		t.Errorf("config = %+v, %v", c, err)
+	}
+}
+
+func TestStartFormat(t *testing.T) {
+	dir := t.TempDir()
+	makeTree(t, dir, "card/a.jpg", "b.HEIC")
+	card, file := filepath.Join(dir, "card"), filepath.Join(dir, "b.HEIC")
+	cfg := config{Format: "{ext}/{date}/{date}_{time}"}
+	tests := []struct {
+		name string
+		opt  Option
+		cfg  config
+		args []string
+		want string
+	}{
+		{"the config's format", Option{}, cfg, []string{card}, cfg.Format},
+		{"files only: in place", Option{}, cfg, []string{file}, presets[0].format},
+		{"no config: in place", Option{}, config{}, []string{card}, presets[0].format},
+		{"--format first", Option{Format: "{date}"}, cfg, []string{file}, "{date}"},
+		{"--preset", Option{Preset: "by date"}, cfg, []string{card}, presets[1].format},
+	}
+	for _, tt := range tests {
+		if got, err := startFormat(tt.opt, tt.cfg, tt.args); err != nil || got != tt.want {
+			t.Errorf("%s: %q, %v, want %q", tt.name, got, err, tt.want)
+		}
+	}
+	if err := checkInteractive(Option{GroupByDate: true}); err == nil {
+		t.Error("-i with -t should be an error")
+	}
+}

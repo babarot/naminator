@@ -9,12 +9,14 @@ import (
 // The styles follow gh-infra's: the terminal's own ANSI colors, so they suit
 // its theme.
 var (
-	Green  lipgloss.Style
-	Red    lipgloss.Style
-	Yellow lipgloss.Style
-	Cyan   lipgloss.Style
-	Bold   lipgloss.Style
-	Dim    lipgloss.Style
+	Green   lipgloss.Style
+	Red     lipgloss.Style
+	Yellow  lipgloss.Style
+	Cyan    lipgloss.Style
+	Blue    lipgloss.Style
+	Magenta lipgloss.Style
+	Bold    lipgloss.Style
+	Dim     lipgloss.Style
 )
 
 func init() {
@@ -29,6 +31,8 @@ func enableStyles() {
 	Red = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	Yellow = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	Cyan = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	Blue = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))
+	Magenta = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
 	Bold = lipgloss.NewStyle().Bold(true)
 	Dim = lipgloss.NewStyle().Faint(true)
 }
@@ -40,6 +44,8 @@ func disableStyles() {
 	Red = lipgloss.NewStyle()
 	Yellow = lipgloss.NewStyle()
 	Cyan = lipgloss.NewStyle()
+	Blue = lipgloss.NewStyle()
+	Magenta = lipgloss.NewStyle()
 	Bold = lipgloss.NewStyle()
 	Dim = lipgloss.NewStyle()
 }
