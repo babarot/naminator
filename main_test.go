@@ -78,6 +78,10 @@ func (m *mockFS) RemoveAll(path string) error {
 	return nil
 }
 
+func (m *mockFS) ReadDir(name string) ([]os.DirEntry, error) {
+	return os.ReadDir(name)
+}
+
 func (m *mockFS) Stat(name string) (os.FileInfo, error) {
 	if m.statFunc != nil {
 		return m.statFunc(name)

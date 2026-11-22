@@ -95,7 +95,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.settle()
 
-	case exifStartMsg, exifResultMsg, renameResultMsg, cleanResultMsg:
+	case exifStartMsg, exifResultMsg, renameResultMsg, cleanResultMsg, warnMsg:
 		if _, f := m.phase.apply(msg, m.now()); f != nil {
 			m.failures = append(m.failures, *f)
 		}

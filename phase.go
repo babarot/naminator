@@ -124,10 +124,13 @@ func (p *phase) apply(msg tea.Msg, now time.Time) (*item, *failure) {
 		case msg.photo.RenamedPath == msg.photo.Path:
 			return p.finish(it, markNone, "already named", "", 0, now)
 		case msg.dryrun:
-			return p.finish(it, markChange, "→ "+p.target(msg.photo.RenamedPath), "", 0, now)
+			return p.finish(it, markChange, "→ "+p.target(msg.photo.RenamedPath)+sidecarNote(msg.photo), "", 0, now)
 		default:
-			return p.finish(it, markDone, "→ "+p.target(msg.photo.RenamedPath), "", 0, now)
+			return p.finish(it, markDone, "→ "+p.target(msg.photo.RenamedPath)+sidecarNote(msg.photo), "", 0, now)
 		}
+
+	case warnMsg:
+		return nil, &failure{name: msg.name, err: msg.text}
 
 	case cleanResultMsg:
 		it := p.byKey[msg.dir]
@@ -146,6 +149,18 @@ func (p *phase) apply(msg tea.Msg, now time.Time) (*item, *failure) {
 		}
 	}
 	return nil, nil
+}
+
+// sidecarNote names the sidecars that went with a photo, as "  + xmp".
+func sidecarNote(photo Photo) string {
+	var exts []string
+	for _, sc := range photo.RenamedSidecars {
+		exts = append(exts, strings.ToLower(strings.TrimPrefix(filepath.Ext(sc), ".")))
+	}
+	if len(exts) == 0 {
+		return ""
+	}
+	return "  + " + strings.Join(exts, " ")
 }
 
 func (p *phase) finish(it *item, m mark, label, err string, took time.Duration, now time.Time) (*item, *failure) {

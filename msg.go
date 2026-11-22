@@ -56,6 +56,12 @@ type renameResultMsg struct {
 	err    error
 }
 
+// warnMsg is something left undone, reported with the failures at the end.
+type warnMsg struct {
+	name string
+	text string
+}
+
 type cleanResultMsg struct {
 	dir    string
 	dryrun bool
