@@ -61,6 +61,10 @@ type phase struct {
 	// drawn, the finished ones printed above. Once set, it stays set.
 	compact  bool
 	canceled bool
+	// peak is the most lines the compact view has had above its blank line
+	// and progress bar. The view keeps that height, so the bar stays put
+	// while the last photos are read and the running rows go away.
+	peak int
 }
 
 // failure is an error to report in full at the end of the run.
@@ -472,7 +476,8 @@ func (p *phase) wantCompact(height int) bool {
 }
 
 // compactView draws the running rows, what is left, and the progress. The
-// title and the finished rows are printed above it.
+// title and the finished rows are printed above it. Rows that went away
+// leave blank lines, down to the height the view has had (peak).
 func (p *phase) compactView(spin string, now time.Time, width, height int) []string {
 	var running []*item
 	for _, it := range p.items {
@@ -507,6 +512,15 @@ func (p *phase) compactView(spin string, now time.Time, width, height int) []str
 	}
 	if len(left) > 0 {
 		lines = append(lines, fitLine("  "+Dim.Render(strings.Join(left, " · ")), width))
+	}
+	p.peak = max(p.peak, len(lines))
+	keep := p.peak
+	if height > 0 {
+		// within the terminal: the blank line, the progress, the cursor's line
+		keep = min(keep, height-fixed+1)
+	}
+	for len(lines) < keep {
+		lines = append(lines, "")
 	}
 	if !tight {
 		lines = append(lines, "")

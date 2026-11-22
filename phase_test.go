@@ -173,6 +173,36 @@ func TestPhaseCompact(t *testing.T) {
 	}
 }
 
+func TestPhaseCompactKeepsHeight(t *testing.T) {
+	var keys []string
+	for i := range 20 {
+		keys = append(keys, fmt.Sprintf("/p/%03d.jpg", i))
+	}
+	p := newPhase(phaseStartMsg{kind: phaseExif, keys: keys, limit: 8}, t0)
+	for _, k := range keys[:8] {
+		p.apply(exifStartMsg{image: k}, t0)
+	}
+	full := len(p.compactView("x", t0, 120, 30))
+	// the queue empties and the running rows go away one by one
+	for i, k := range keys {
+		p.apply(exifResultMsg{image: k, photo: Photo{Path: k}}, t0)
+		if next := i + 8; next < len(keys) {
+			p.apply(exifStartMsg{image: keys[next]}, t0)
+		}
+		lines := p.compactView("x", t0, 120, 30)
+		if len(lines) != full {
+			t.Fatalf("after %d photos the view is %d lines, want %d:\n%s", i+1, len(lines), full, plain(strings.Join(lines, "\n")))
+		}
+		if !strings.Contains(plain(lines[len(lines)-1]), "photos") {
+			t.Fatalf("the last line should be the progress, got %q", plain(lines[len(lines)-1]))
+		}
+	}
+	// a terminal too short for the height kept: within it still
+	if lines := p.compactView("x", t0, 120, 5); len(lines)+1 > 5 {
+		t.Errorf("on 5 lines the view is %d lines", len(lines))
+	}
+}
+
 func TestErrorReport(t *testing.T) {
 	got := plain(strings.Join(errorReport([]failure{{name: "a.jpg", err: "line 1\nline 2"}}), "\n"))
 	if want := "  a.jpg:\n    line 1\n    line 2\n"; got != want {
