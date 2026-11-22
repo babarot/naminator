@@ -117,6 +117,9 @@ type CLI struct {
 	// namer gives each photo its path; nil names photos by the flags
 	// (legacyNamer)
 	namer *namer
+	// planned are the paths the interactive screen showed, by photo path:
+	// a photo goes there unless the path is taken by then
+	planned map[string]string
 	// base and into are where rename targets are shown from (phaseStartMsg)
 	base string
 	into bool
@@ -621,7 +624,14 @@ func (c CLI) target(photo Photo) string {
 }
 
 func (c CLI) rename(photo Photo) (Photo, bool, error) {
-	photo.RenamedPath = c.paths.reserve(c.fs, photo.Path, c.target(photo))
+	// The path previewed, as shown: renaming one by one would free paths
+	// the preview saw taken, and number photos otherwise. A path taken by
+	// now is reserved as any other, so that nothing is overwritten.
+	if to, ok := c.planned[photo.Path]; ok && c.paths.claim(c.fs, photo.Path, to) {
+		photo.RenamedPath = to
+	} else {
+		photo.RenamedPath = c.paths.reserve(c.fs, photo.Path, c.target(photo))
+	}
 	// The sidecars go with the photo, named after its new name. A sidecar
 	// whose path is taken stops the photo too, so that they keep matching.
 	var moves [][2]string

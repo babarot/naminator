@@ -65,11 +65,11 @@ func (m tuiModel) tree() *treeDir {
 	var entries []entry
 	for _, r := range m.rows {
 		path := r.key
-		if r.read && r.err == "" && r.target != "" && m.tplErr == "" {
+		if r.usable() && r.target != "" && m.tplErr == "" {
 			path = r.target
 		}
 		entries = append(entries, entry{absPath(path), treeFile{name: filepath.Base(path), row: r}})
-		if r.read && r.err == "" && r.target != "" && !r.same && m.tplErr == "" {
+		if r.usable() && r.target != "" && !r.same && m.tplErr == "" {
 			for _, sc := range m.sidecars[r.photo.Path] {
 				to := sidecarTarget(r.photo.Path, r.target, sc)
 				entries = append(entries, entry{absPath(to), treeFile{name: filepath.Base(to), row: r, sidecar: true}})
@@ -137,7 +137,7 @@ func (d *treeDir) counts() (total, numbered, check int) {
 		if f.row.suffix != "" {
 			numbered++
 		}
-		if f.row.err != "" {
+		if f.row.skipped() {
 			check++
 		}
 	}
@@ -270,7 +270,7 @@ func (m tuiModel) fileText(f treeFile) string {
 		return Dim.Render(f.name)
 	case !r.read:
 		return Dim.Render(f.name + "  (reading EXIF…)")
-	case r.err != "":
+	case r.skipped():
 		return Red.Render(f.name) + Dim.Render("  (no shooting time)")
 	case r.same || m.tplErr != "":
 		return Dim.Render(f.name + "  (already named)")
@@ -278,6 +278,9 @@ func (m tuiModel) fileText(f treeFile) string {
 	s := f.name + Dim.Render("  ← "+r.key)
 	if r.suffix != "" {
 		s += "  " + Yellow.Render(r.suffix)
+	}
+	if r.fileTime {
+		s += "  " + Yellow.Render(iconFileTime) + Dim.Render(" file time")
 	}
 	return s
 }
@@ -288,7 +291,7 @@ func (m tuiModel) fileText(f treeFile) string {
 func (m tuiModel) predictRemoved() []string {
 	moves := newPendingMoves()
 	for _, r := range m.rows {
-		if !r.read || r.err != "" || r.same || r.target == "" {
+		if !r.usable() || r.same || r.target == "" {
 			continue
 		}
 		moves.add(r.photo.Path, r.target)

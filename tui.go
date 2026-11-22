@@ -40,8 +40,13 @@ const (
 type tuiDecision struct {
 	result tuiResult
 	format string
-	// failed are the photos whose EXIF data could not be read, to report
-	failed []failure
+	// failed are the photos whose EXIF data could not be read, to report,
+	// and fileTime those given the file's time instead, to rename too
+	failed   []failure
+	fileTime []Photo
+	// targets are the paths previewed, by photo path: the run gives them,
+	// so that the photos go where they were shown to go
+	targets map[string]string
 }
 
 type tuiView int
@@ -69,6 +74,21 @@ type tuiRow struct {
 	target string
 	suffix string
 	same   bool
+	// fileTime uses the file's modification time for a photo without a
+	// shooting time (m), instead of skipping it
+	fileTime bool
+}
+
+// usable reports whether the photo gets a path: read, with a shooting
+// time or the file's time.
+func (r *tuiRow) usable() bool {
+	return r.read && (r.err == "" || r.fileTime)
+}
+
+// skipped reports whether the photo is left out: read without a shooting
+// time, and not given the file's time.
+func (r *tuiRow) skipped() bool {
+	return r.read && r.err != "" && !r.fileTime
 }
 
 type tuiModel struct {
@@ -166,7 +186,7 @@ func (m *tuiModel) plan() {
 	m.namer = newNamer(tpl, m.args, m.destDir)
 	var photos []Photo
 	for _, r := range m.rows {
-		if r.read && r.err == "" {
+		if r.usable() {
 			photos = append(photos, r.photo)
 		}
 	}
@@ -202,7 +222,7 @@ func (m tuiModel) keyOf(p Photo) string {
 func (m tuiModel) photos() []Photo {
 	var out []Photo
 	for _, r := range m.rows {
-		if r.read && r.err == "" {
+		if r.usable() {
 			out = append(out, r.photo)
 		}
 	}
@@ -315,10 +335,16 @@ func (m tuiModel) decide() {
 	if m.decided == nil {
 		return
 	}
-	d := tuiDecision{result: m.result, format: m.format}
+	d := tuiDecision{result: m.result, format: m.format, targets: map[string]string{}}
 	for _, row := range m.rows {
-		if row.err != "" {
+		if row.usable() && row.target != "" {
+			d.targets[row.photo.Path] = row.target
+		}
+		switch {
+		case row.skipped():
 			d.failed = append(d.failed, failure{name: filepath.Base(row.key), err: row.err})
+		case row.fileTime:
+			d.fileTime = append(d.fileTime, row.photo)
 		}
 	}
 	m.decided <- d
@@ -437,6 +463,8 @@ func (m tuiModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.fold(true)
 	case "t":
 		m.toggleView()
+	case "m":
+		m.toggleFileTime()
 	case "enter":
 		if ok, _ := m.ready(); ok {
 			m.confirm = true
@@ -445,6 +473,36 @@ func (m tuiModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.end(tuiQuit)
 	}
 	return m, nil
+}
+
+// toggleFileTime gives the photo under the cursor, read without a shooting
+// time, the file's modification time instead, or takes it back.
+func (m *tuiModel) toggleFileTime() {
+	r := m.selected()
+	if r == nil || !r.read || r.err == "" {
+		return
+	}
+	if r.fileTime {
+		r.fileTime = false
+	} else {
+		fi, err := os.Stat(r.key)
+		if err != nil {
+			m.notice = Red.Render("no file time: " + err.Error())
+			return
+		}
+		r.fileTime = true
+		r.photo = Photo{
+			Name:      filepath.Base(r.key),
+			Path:      r.key,
+			Dir:       filepath.Dir(r.key),
+			Extension: strings.ToLower(strings.TrimPrefix(filepath.Ext(r.key), ".")),
+			CreatedAt: fi.ModTime(),
+		}
+	}
+	if m.nRead == len(m.rows) {
+		m.sidecars, _ = findSidecars(m.fs, m.photos())
+	}
+	m.plan()
 }
 
 // toggleView switches between the list and the tree.
@@ -773,8 +831,8 @@ func (m tuiModel) partsLine() string {
 		return "  " + Dim.Render("a directory: h folds it, l opens it")
 	case !r.read:
 		return "  " + Dim.Render("reading EXIF of the selected photo…")
-	case r.err != "":
-		return "  " + Dim.Render("no shooting time in its EXIF: it is skipped")
+	case r.skipped():
+		return "  " + Dim.Render("no shooting time in its EXIF: it is skipped (m uses the file's time)")
 	case m.namer == nil:
 		return ""
 	}
@@ -804,7 +862,7 @@ func (m tuiModel) row(r *tuiRow, selected bool, fromW int) string {
 	switch {
 	case !r.read:
 		return lead + Dim.Render(iconQueued) + " " + Dim.Render(from) + "  " + Dim.Render("reading EXIF…")
-	case r.err != "":
+	case r.skipped():
 		return lead + Red.Render(iconError) + " " + from + "  " + Dim.Render("no shooting time; skipped")
 	case m.namer == nil:
 		return lead + Dim.Render(iconQueued) + " " + from + "  " + Dim.Render("→ ?")
@@ -824,7 +882,12 @@ func (m tuiModel) row(r *tuiRow, selected bool, fromW int) string {
 		}
 		note = Dim.Render("  + " + strings.Join(exts, " "))
 	}
-	return lead + Yellow.Render(iconChange) + " " + from + "  " + Dim.Render("→") + " " + to + note
+	mark := Yellow.Render(iconChange)
+	if r.fileTime {
+		mark = Yellow.Render(iconFileTime)
+		note += Dim.Render("  (file time)")
+	}
+	return lead + mark + " " + from + "  " + Dim.Render("→") + " " + to + note
 }
 
 // countLine counts what the photos would get.
@@ -837,7 +900,7 @@ func (m tuiModel) countLine() string {
 		switch {
 		case !r.read:
 			reading++
-		case r.err != "":
+		case r.skipped():
 			failed++
 		case r.same:
 			same++
@@ -862,10 +925,24 @@ func (m tuiModel) countLine() string {
 	if failed > 0 {
 		parts = append(parts, Red.Render(fmt.Sprintf("%d without a shooting time", failed)))
 	}
+	if n := m.countFileTime(); n > 0 {
+		parts = append(parts, Yellow.Render(fmt.Sprintf("%d by file time", n)))
+	}
 	if n := len(m.removed); n > 0 {
 		parts = append(parts, Dim.Render(fmt.Sprintf("%d %s removed", n, plural(n, "directory", "directories"))))
 	}
 	return "  " + joinDim(parts)
+}
+
+// countFileTime counts the photos given the file's time.
+func (m tuiModel) countFileTime() int {
+	n := 0
+	for _, r := range m.rows {
+		if r.fileTime {
+			n++
+		}
+	}
+	return n
 }
 
 // help lists the keys of the mode, or asks to confirm.
@@ -895,7 +972,14 @@ func (m tuiModel) help() string {
 	} else {
 		keys = append(keys, key("t", "tree"))
 	}
+	if r := m.selected(); r != nil && r.read && r.err != "" {
+		keys = append(keys, key("m", "file time"))
+	}
 	keys = append(keys, enter, key("ctrl+s", "save"), key("q", "quit"))
+	// on a narrow terminal, leave out ctrl+s, which is shown last otherwise
+	if line := strings.Join(keys, Dim.Render(" • ")); ansi.StringWidth(line) > m.width-2 {
+		keys = slices.DeleteFunc(keys, func(k string) bool { return strings.HasPrefix(k, "ctrl+s") })
+	}
 	return strings.Join(keys, Dim.Render(" • "))
 }
 
