@@ -76,7 +76,7 @@ Help Options:
 
 Pass directories containing images as arguments, and rename the images based on their EXIF data. The renaming will occur within the same directories.
 
-Only image files are renamed. Other files, such as XMP sidecar files (`.xmp`), are left where they are and keep their names, so they no longer match their photos. A directory that still has such files is not removed by `--clean`.
+Sidecar files (`.xmp`, `.aae`, `.dop`, `.pp3`) named after a photo, as `DSC05501.xmp` or `DSC05501.ARW.xmp`, are renamed with it, so they keep matching it. When a raw file and a JPEG or HEIF share a sidecar (`DSC05501.ARW` and `DSC05501.JPG` with `DSC05501.xmp`), it goes with the raw file; when no single raw file owns it, it is left where it is and reported at the end. A photo whose sidecar would go to a path that is taken is not renamed. Other files are left where they are, and a directory that still has them is not removed by `--clean`.
 
 ```console
 $ naminator -tec ./DCIM/10550129

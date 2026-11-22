@@ -63,6 +63,7 @@ type FileSystem interface {
 	MkdirAll(path string, perm os.FileMode) error
 	RemoveAll(path string) error
 	Stat(name string) (os.FileInfo, error)
+	ReadDir(name string) ([]os.DirEntry, error)
 }
 
 // osFS is the real filesystem implementation.
@@ -72,6 +73,7 @@ func (osFS) Rename(oldpath, newpath string) error         { return os.Rename(old
 func (osFS) MkdirAll(path string, perm os.FileMode) error { return os.MkdirAll(path, perm) }
 func (osFS) RemoveAll(path string) error                  { return os.RemoveAll(path) }
 func (osFS) Stat(name string) (os.FileInfo, error)        { return os.Stat(name) }
+func (osFS) ReadDir(name string) ([]os.DirEntry, error)   { return os.ReadDir(name) }
 
 // exiftoolExtractor is the real ExifExtractor using go-exiftool. It keeps
 // one exiftool process running (stay_open) and reuses it for every file.
@@ -388,11 +390,17 @@ func (c CLI) processAll() {
 		}
 		return strings.Compare(a.Path, b.Path)
 	})
+	sidecars, warnings := findSidecars(c.fs, photos)
 	keys := make([]string, len(photos))
 	for i, photo := range photos {
 		keys[i] = photo.Path
+		photos[i].Sidecars = sidecars[photo.Path]
 	}
 	c.sender.Send(phaseStartMsg{kind: phaseRename, keys: keys, base: c.base, into: c.into, dry: c.opt.Dryrun})
+	for _, w := range warnings {
+		c.sender.Send(warnMsg{name: filepath.Base(w.path), text: w.reason})
+		c.logger.Warn("sidecar not moved", "path", w.path, "reason", w.reason)
+	}
 	for _, photo := range photos {
 		// Stop between renames: the one in hand is done whole
 		if c.isCanceled() {
@@ -456,11 +464,7 @@ func (c CLI) extract(exif ExifExtractor, image string) (Photo, bool) {
 
 func (c CLI) renameAndReport(photo Photo) {
 	photo, dryrun, err := c.rename(photo)
-	if dryrun {
-		c.sender.Send(renameResultMsg{photo: photo, dryrun: true})
-	} else {
-		c.sender.Send(renameResultMsg{photo: photo, dryrun: false, err: err})
-	}
+	c.sender.Send(renameResultMsg{photo: photo, dryrun: dryrun, err: err})
 	if err != nil {
 		c.logger.Error("failed to rename", "err", err,
 			"name", photo.Name,
@@ -513,6 +517,18 @@ func (r *pathReserver) reserve(fsys FileSystem, src, want string) string {
 	}
 }
 
+// claim reserves path for src when it is free: not handed out yet, and no
+// file other than src is there.
+func (r *pathReserver) claim(fsys FileSystem, src, path string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.paths[path] || isOtherFile(fsys, path, src) {
+		return false
+	}
+	r.paths[path] = true
+	return true
+}
+
 // isOtherFile reports whether path exists and is not the file at src.
 func isOtherFile(fsys FileSystem, path, src string) bool {
 	fi, err := fsys.Stat(path)
@@ -533,14 +549,51 @@ func (c CLI) target(photo Photo) string {
 
 func (c CLI) rename(photo Photo) (Photo, bool, error) {
 	photo.RenamedPath = c.paths.reserve(c.fs, photo.Path, c.target(photo))
+	// The sidecars go with the photo, named after its new name. A sidecar
+	// whose path is taken stops the photo too, so that they keep matching.
+	var moves [][2]string
+	if photo.RenamedPath != photo.Path {
+		for _, sc := range photo.Sidecars {
+			to := sidecarTarget(photo.Path, photo.RenamedPath, sc)
+			// DSC05501.xmp and DSC05501.XMP would be one file where case
+			// does not matter, and the second would overwrite the first
+			for _, m := range moves {
+				if strings.EqualFold(m[1], to) {
+					return photo, c.opt.Dryrun, fmt.Errorf("not moved: its sidecars %s and %s would go to the same path %s", filepath.Base(m[0]), filepath.Base(sc), to)
+				}
+			}
+			if !c.paths.claim(c.fs, sc, to) {
+				return photo, c.opt.Dryrun, fmt.Errorf("not moved: its sidecar %s would go to %s, which is taken", filepath.Base(sc), to)
+			}
+			moves = append(moves, [2]string{sc, to})
+		}
+	}
+	for _, m := range moves {
+		photo.RenamedSidecars = append(photo.RenamedSidecars, m[1])
+	}
 	if c.opt.Dryrun {
 		c.moves.add(photo.Path, photo.RenamedPath)
+		for _, m := range moves {
+			c.moves.add(m[0], m[1])
+		}
 		return photo, true, nil
 	}
 	if err := c.fs.MkdirAll(filepath.Dir(photo.RenamedPath), 0755); err != nil {
 		return photo, false, err
 	}
-	return photo, false, c.fs.Rename(photo.Path, photo.RenamedPath)
+	if err := c.fs.Rename(photo.Path, photo.RenamedPath); err != nil {
+		return photo, false, err
+	}
+	for _, m := range moves {
+		// Look again just before: a rename replaces a file that is there
+		if isOtherFile(c.fs, m[1], m[0]) {
+			return photo, false, fmt.Errorf("renamed, but its sidecar %s was not: %s is taken", filepath.Base(m[0]), m[1])
+		}
+		if err := c.fs.Rename(m[0], m[1]); err != nil {
+			return photo, false, fmt.Errorf("renamed, but its sidecar %s was not: %w", filepath.Base(m[0]), err)
+		}
+	}
+	return photo, false, nil
 }
 
 func (c CLI) clean(paths []string) {
@@ -597,6 +650,10 @@ type Photo struct {
 	Extension   string
 	// Camera is the model of the camera, from EXIF (empty if unknown)
 	Camera string
+	// Sidecars are the files that go with the photo (see findSidecars), and
+	// RenamedSidecars where they went
+	Sidecars        []string
+	RenamedSidecars []string
 	// CreatedAt is the clock time where the photo was taken (see parseExifTime)
 	CreatedAt time.Time
 }
