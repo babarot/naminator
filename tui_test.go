@@ -559,3 +559,38 @@ func TestRenameUsesThePlannedPath(t *testing.T) {
 		t.Errorf("renamed to %q, %v; want taken_1.jpg", p.RenamedPath, err)
 	}
 }
+
+func TestInteractiveByDefault(t *testing.T) {
+	tests := []struct {
+		name     string
+		opt      Option
+		terminal bool
+		want     bool
+	}{
+		{"a terminal", Option{}, true, true},
+		{"a terminal with -c, -n, -d, --format", Option{Clean: true, Dryrun: true, DestDir: "/out", Format: "{date}"}, true, true},
+		{"--yes", Option{Yes: true}, true, false},
+		{"no terminal", Option{}, false, false},
+		{"-tecE as before", Option{GroupByDate: true, GroupByExt: true, GroupExtFirst: true}, true, false},
+		{"-i asks for it", Option{Interactive: true, Yes: true}, false, true},
+	}
+	for _, tt := range tests {
+		if got := interactive(tt.opt, tt.terminal); got != tt.want {
+			t.Errorf("%s: %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+// -d alone starts with the photos put into the destination as they are,
+// as -d has always done.
+func TestStartFormatWithDest(t *testing.T) {
+	dir := t.TempDir()
+	makeTree(t, dir, "card/a.jpg")
+	got, err := startFormat(Option{DestDir: "/out"}, config{}, []string{filepath.Join(dir, "card")})
+	if err != nil || got != "{date}_{time}" {
+		t.Errorf("startFormat = %q, %v", got, err)
+	}
+	if got, _ := startFormat(Option{DestDir: "/out"}, config{Format: "{ext}/{date}"}, []string{filepath.Join(dir, "card")}); got != "{ext}/{date}" {
+		t.Errorf("with a config: %q", got)
+	}
+}
