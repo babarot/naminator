@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -455,5 +457,105 @@ func TestTUITreeFold(t *testing.T) {
 	m = m.send(t, keys("t", "j", "h")...)
 	if m.view != viewList || m.sel != 1 {
 		t.Errorf("view = %v, sel = %d", m.view, m.sel)
+	}
+}
+
+// m gives a photo without a shooting time the file's modification time,
+// and takes it back.
+func TestTUIFileTime(t *testing.T) {
+	m := newCardsTUI(t)
+	decided := make(chan tuiDecision, 1)
+	m.decided = decided
+	r := m.rows[7] // read without a shooting time
+	mtime := time.Date(2026, 10, 6, 18, 2, 11, 0, time.Local)
+	if err := os.Chtimes(r.key, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+	// m does nothing on a photo with a shooting time
+	m.sel = 0
+	m = m.send(t, keys("m")...)
+	if m.countFileTime() != 0 || strings.Contains(ansi.Strip(m.help()), "file time") {
+		t.Fatal("m should do nothing on a photo with a shooting time")
+	}
+	m.sel = 7
+	if !strings.Contains(ansi.Strip(m.help()), "m file time") {
+		t.Errorf("help = %q, want m", ansi.Strip(m.help()))
+	}
+	// on a narrow terminal the keys still fit, q included
+	m.width = 100
+	if h := ansi.Strip(m.help()); ansi.StringWidth(h) > 98 || !strings.HasSuffix(h, "q quit") {
+		t.Errorf("help on 100 columns = %q", h)
+	}
+	m.width = 120
+	m = m.send(t, keys("m")...)
+	r = m.rows[7]
+	if !r.fileTime || !r.usable() || !strings.HasSuffix(r.target, "jpg/2026-10-06/2026-10-06_18-02-11.jpg") {
+		t.Fatalf("fileTime = %v, target = %q", r.fileTime, r.target)
+	}
+	line := ansi.Strip(m.row(r, false, 20))
+	if !strings.Contains(line, iconFileTime) || !strings.Contains(line, "(file time)") {
+		t.Errorf("row = %q", line)
+	}
+	if c := ansi.Strip(m.countLine()); !strings.Contains(c, "1 by file time") || strings.Contains(c, "without a shooting time") {
+		t.Errorf("count line = %q", c)
+	}
+	// renamed with the others once confirmed, and not reported as failed
+	m = m.send(t, keys("enter", "y")...)
+	m = m.send(t, handoverMsg{})
+	d := <-decided
+	if len(d.fileTime) != 1 || d.fileTime[0].Path != r.key || len(d.failed) != 0 {
+		t.Errorf("decided %+v", d)
+	}
+	// m again takes it back
+	m2 := newCardsTUI(t)
+	m2.sel = 7
+	m2 = m2.send(t, keys("m", "m")...)
+	if m2.rows[7].fileTime || !m2.rows[7].skipped() {
+		t.Error("m twice should skip the photo again")
+	}
+}
+
+// The run renames a photo to the path previewed: renaming one by one would
+// free a path the preview saw taken, and drop its _1.
+func TestRenameUsesThePlannedPath(t *testing.T) {
+	root := t.TempDir()
+	makeTree(t, root, "card/2026-10-06_11-00-00.jpg", "card/screenshot.jpg")
+	card := filepath.Join(root, "card")
+	named := filepath.Join(card, "2026-10-06_11-00-00.jpg")
+	shot := filepath.Join(card, "screenshot.jpg")
+	at := time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC)
+	photos := []Photo{
+		{Name: "2026-10-06_11-00-00.jpg", Path: named, Dir: card, Extension: "jpg", CreatedAt: at.Add(10 * time.Hour)},
+		{Name: "screenshot.jpg", Path: shot, Dir: card, Extension: "jpg", CreatedAt: at.Add(11 * time.Hour)},
+	}
+	planned := map[string]string{
+		named: filepath.Join(card, "2026-10-06_10-00-00.jpg"),
+		shot:  filepath.Join(card, "2026-10-06_11-00-00_1.jpg"),
+	}
+	cli := CLI{
+		opt:     Option{},
+		fs:      osFS{},
+		paths:   newPathReserver(),
+		moves:   newPendingMoves(),
+		sender:  &mockSender{},
+		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		namer:   newNamer(mustParseTemplate("{dir}/{date}_{time}"), []string{card}, ""),
+		planned: planned,
+	}
+	cli.renameAll(photos, true)
+	for _, p := range []string{"2026-10-06_10-00-00.jpg", "2026-10-06_11-00-00_1.jpg"} {
+		if _, err := os.Stat(filepath.Join(card, p)); err != nil {
+			t.Errorf("%s: %v", p, err)
+		}
+	}
+	// a planned path taken by then is not overwritten
+	makeTree(t, root, "card2/a.jpg", "card2/taken.jpg")
+	card2 := filepath.Join(root, "card2")
+	cli.paths = newPathReserver()
+	cli.planned = map[string]string{filepath.Join(card2, "a.jpg"): filepath.Join(card2, "taken.jpg")}
+	cli.namer = newNamer(mustParseTemplate("{dir}/taken"), []string{card2}, "")
+	p, _, err := cli.rename(Photo{Name: "a.jpg", Path: filepath.Join(card2, "a.jpg"), Dir: card2, Extension: "jpg", CreatedAt: at})
+	if err != nil || p.RenamedPath != filepath.Join(card2, "taken_1.jpg") {
+		t.Errorf("renamed to %q, %v; want taken_1.jpg", p.RenamedPath, err)
 	}
 }

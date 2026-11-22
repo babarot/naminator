@@ -62,4 +62,5 @@ const (
 	iconRemove   = "-"
 	iconQueued   = "·"
 	iconEllipsis = "…"
+	iconFileTime = "≈"
 )

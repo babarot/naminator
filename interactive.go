@@ -85,11 +85,14 @@ func (c CLI) runInteractive(tui tuiModel) error {
 			return
 		}
 		c.namer = newNamer(tpl, c.args, c.opt.DestDir)
+		c.planned = d.targets
 		c.logger.Debug("format chosen", "format", d.format)
 		// The photos the screen could not read are reported at the end
 		for _, f := range d.failed {
 			c.sender.Send(warnMsg{name: f.name, text: f.err})
 		}
+		// and those given the file's time are renamed with the others
+		photos = append(photos, d.fileTime...)
 		c.renameAll(photos, false)
 		c.finish()
 	})
