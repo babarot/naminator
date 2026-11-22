@@ -59,12 +59,17 @@ Usage:
   naminator [OPTIONS] [files... | dirs...]
 
 Application Options:
+  -f, --format=           The path to rename photos to, as
+                          {ext}/{date}/{date}_{time}
+  -p, --preset=           The format of a preset, by name, as "by extension,
+                          then date"
   -d, --dest-dir=         The directory path where renamed photos will be moved
   -n, --dry-run           Simulate the command's actions without executing them
-  -t, --group-by-date     Create a directory for each date and organize photos accordingly
-  -e, --group-by-ext      Create a directory for each file extension and organize the photos accordingly
-  -E, --group-ext-first   Prioritize grouping by extension over date (requires -e and -t)
   -c, --clean             Remove empty directories after renaming
+  -t, --group-by-date     Deprecated: use --preset "by date"
+  -e, --group-by-ext      Deprecated: use --preset "by extension"
+  -E, --group-ext-first   Deprecated: with -t and -e, use --preset "by
+                          extension, then date"
 
 Meta Options:
       --debug=[full|live] View debug logs (default: "full")
@@ -75,6 +80,54 @@ Help Options:
 ```
 
 Pass directories containing images as arguments, and rename the images based on their EXIF data. The renaming will occur within the same directories.
+
+### Format
+
+`--format` sets the path photos are renamed to, with placeholders for their values. `/` makes directories, and the extension is added at the end:
+
+```console
+$ naminator --format '{ext}/{date}/{date}_{time}' 10551007 10651008
+```
+
+| Placeholder | Value |
+|---|---|
+| `{date}` `{time}` | `2026-10-04` `14-22-09` |
+| `{year}` `{month}` `{day}` `{hour}` `{min}` `{sec}` | `2026` `10` `04` `14` `22` `09` |
+| `{orig}` | The original name without the extension, as `DSC05501` |
+| `{ext}` | The extension in lower case, as `arw` |
+| `{camera}` | The camera model, as `ILCE-7CM2` (spaces become `_`) |
+| `{seq}` | `001`, `002`, ... among the photos that would get the same path, in the order they were taken |
+| `{dir}` | The directory of the photo, from where the path starts |
+
+The path starts from the directory each argument is in: for `10551007` above, its parent, so photos of both folders go to `arw/2026-10-04/...` next to them. With `--dest-dir`, it starts there. Photos taken in the same second get `_1`, `_2`, ... in the order they were taken, and no file is overwritten.
+
+`--preset` uses a format by name:
+
+| Preset | Format |
+|---|---|
+| `date and time` | `{dir}/{date}_{time}` |
+| `by date` | `{date}/{date}_{time}` |
+| `by extension` | `{ext}/{date}_{time}` |
+| `by date, then extension` | `{date}/{ext}/{date}_{time}` |
+| `by extension, then date` | `{ext}/{date}/{date}_{time}` |
+| `keep the original name` | `{date}/{time}_{orig}` |
+| `numbered by camera` | `{camera}/{date}_{seq}` |
+
+`-t`, `-e` and `-E` still work as before, and will be removed: `-tecE` is `--preset "by extension, then date" -c`.
+
+### Configuration
+
+`~/.config/naminator/config.yaml` (under `$XDG_CONFIG_HOME` when it is set) sets the format used when none is given, whether to remove the directories left empty, and presets of your own:
+
+```yaml
+format: "{ext}/{date}/{date}_{time}"
+clean: true
+presets:
+  - name: for the blog
+    format: "blog/{date}/{date}_{orig}"
+```
+
+Without the file, or without `format`, photos are renamed in place as before.
 
 Sidecar files (`.xmp`, `.aae`, `.dop`, `.pp3`) named after a photo, as `DSC05501.xmp` or `DSC05501.ARW.xmp`, are renamed with it, so they keep matching it. When a raw file and a JPEG or HEIF share a sidecar (`DSC05501.ARW` and `DSC05501.JPG` with `DSC05501.xmp`), it goes with the raw file; when no single raw file owns it, it is left where it is and reported at the end. A photo whose sidecar would go to a path that is taken is not renamed. Other files are left where they are, and a directory that still has them is not removed by `--clean`.
 

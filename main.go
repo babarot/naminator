@@ -33,12 +33,14 @@ var (
 
 // Option struct with the new GroupExtFirst flag
 type Option struct {
+	Format        string     `short:"f" long:"format" description:"The path to rename photos to, as {ext}/{date}/{date}_{time}"`
+	Preset        string     `short:"p" long:"preset" description:"The format of a preset, by name, as \"by extension, then date\""`
 	DestDir       string     `short:"d" long:"dest-dir" description:"The directory path where renamed photos will be moved" default:""`
 	Dryrun        bool       `short:"n" long:"dry-run" description:"Simulate the command's actions without executing them"`
-	GroupByDate   bool       `short:"t" long:"group-by-date" description:"Create a directory for each date and organize photos accordingly"`
-	GroupByExt    bool       `short:"e" long:"group-by-ext" description:"Create a directory for each file extension and organize the photos accordingly"`
-	GroupExtFirst bool       `short:"E" long:"group-ext-first" description:"Prioritize grouping by extension over date (requires -e and -t)"`
 	Clean         bool       `short:"c" long:"clean" description:"Remove empty directories after renaming"`
+	GroupByDate   bool       `short:"t" long:"group-by-date" description:"Deprecated: use --preset \"by date\""`
+	GroupByExt    bool       `short:"e" long:"group-by-ext" description:"Deprecated: use --preset \"by extension\""`
+	GroupExtFirst bool       `short:"E" long:"group-ext-first" description:"Deprecated: with -t and -e, use --preset \"by extension, then date\""`
 	Meta          MetaOption `group:"Meta Options"`
 }
 
@@ -214,6 +216,23 @@ func runMain() error {
 		return fmt.Errorf("too few arguments")
 	}
 
+	cfgPath, err := configPath()
+	if err != nil {
+		return err
+	}
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		return err
+	}
+	namer, note, err := chooseNamer(opt, cfg, args)
+	if err != nil {
+		return err
+	}
+	if note != "" {
+		fmt.Fprintf(os.Stderr, "%s: %s\n", appName, note)
+	}
+	opt.Clean = opt.Clean || cfg.Clean
+
 	images, err := getImages(args)
 	if err != nil {
 		return err
@@ -247,7 +266,7 @@ func runMain() error {
 		fs:     osFS{},
 		paths:  newPathReserver(),
 		moves:  newPendingMoves(),
-		namer:  legacyNamer(opt),
+		namer:  namer,
 		base:   base,
 		into:   into,
 	}

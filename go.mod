@@ -9,6 +9,7 @@ require (
 	github.com/barasher/go-exiftool v1.10.0
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/gabriel-vasile/mimetype v1.4.8
+	github.com/goccy/go-yaml v1.19.2
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/nxadm/tail v1.4.11
