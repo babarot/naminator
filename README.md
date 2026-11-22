@@ -59,6 +59,8 @@ Usage:
   naminator [OPTIONS] [files... | dirs...]
 
 Application Options:
+  -i, --interactive       Preview the new paths and choose the format before
+                          renaming
   -f, --format=           The path to rename photos to, as
                           {ext}/{date}/{date}_{time}
   -p, --preset=           The format of a preset, by name, as "by extension,

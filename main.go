@@ -33,6 +33,7 @@ var (
 
 // Option struct with the new GroupExtFirst flag
 type Option struct {
+	Interactive   bool       `short:"i" long:"interactive" description:"Preview the new paths and choose the format before renaming"`
 	Format        string     `short:"f" long:"format" description:"The path to rename photos to, as {ext}/{date}/{date}_{time}"`
 	Preset        string     `short:"p" long:"preset" description:"The format of a preset, by name, as \"by extension, then date\""`
 	DestDir       string     `short:"d" long:"dest-dir" description:"The directory path where renamed photos will be moved" default:""`
@@ -224,8 +225,14 @@ func runMain() error {
 	if err != nil {
 		return err
 	}
-	namer, note, err := chooseNamer(opt, cfg, args)
-	if err != nil {
+	var namer *namer
+	var note string
+	if !opt.Interactive {
+		namer, note, err = chooseNamer(opt, cfg, args)
+		if err != nil {
+			return err
+		}
+	} else if err := checkInteractive(opt); err != nil {
 		return err
 	}
 	if note != "" {
@@ -273,6 +280,9 @@ func runMain() error {
 	first := phaseStartMsg{kind: phaseExif, keys: images, limit: len(exifs)}
 
 	if !isatty.IsTerminal(os.Stdout.Fd()) {
+		if opt.Interactive {
+			return errors.New("-i needs a terminal")
+		}
 		disableStyles()
 		cli.sender = newPlainSender(os.Stdout, first)
 		return cli.run()
@@ -281,14 +291,24 @@ func runMain() error {
 	canceled := make(chan struct{})
 	var once sync.Once
 	cancel := func() { once.Do(func() { close(canceled) }) }
+	cli.canceled = canceled
+	cli.cancel = cancel
+
+	if opt.Interactive {
+		format, err := startFormat(opt, cfg, args)
+		if err != nil {
+			return err
+		}
+		tui := newTUIModel(args, images, format, opt.DestDir, opt.Dryrun, cfg.allPresets(), cli.fs, cfgPath, cancel)
+		return cli.runInteractive(tui)
+	}
+
 	model := newModel(first, cancel)
 	if title := model.startCompact(); title != "" {
 		fmt.Println(title)
 	}
 	cli.p = tea.NewProgram(model, tea.WithoutSignalHandler())
 	cli.sender = cli.p
-	cli.canceled = canceled
-	cli.cancel = cancel
 	return cli.run()
 }
 
@@ -314,27 +334,47 @@ func displayBase(args []string, opt Option) (base string, into bool) {
 }
 
 func (c CLI) run() error {
-	c.logger.Debug("start")
-	defer c.logger.Debug("end")
-
-	work := func() {
+	return c.runWork(func() {
 		// Process all photos, then remove empty directories
 		c.processAll()
-		if c.opt.Clean && !c.isCanceled() {
-			c.sender.Send(phaseStartMsg{kind: phaseClean, dry: c.opt.Dryrun})
-			c.clean(c.args)
-		}
-		// Signal completion to stop UI rendering
-		c.sender.Send(finishMsg{})
+		c.finish()
+	})
+}
+
+// finish removes the empty directories when asked, and ends the display.
+func (c CLI) finish() {
+	if c.opt.Clean && !c.isCanceled() {
+		c.sender.Send(phaseStartMsg{kind: phaseClean, dry: c.opt.Dryrun})
+		c.clean(c.args)
 	}
+	// Signal completion to stop UI rendering
+	c.sender.Send(finishMsg{})
+}
+
+// runWork runs work with the display: plain without a terminal (c.p is
+// nil), else the program c.p, which quits once work has sent finishMsg{}
+// and everything is printed.
+func (c CLI) runWork(work func()) error {
+	c.logger.Debug("start")
+	defer c.logger.Debug("end")
 
 	if c.p == nil {
 		work()
 		return nil
 	}
+	if _, err := c.runProgram(c.p, work); err != nil {
+		return err
+	}
+	if c.isCanceled() {
+		return errCanceled
+	}
+	return nil
+}
 
-	// c.p.Run() blocks until the model quits, which it does once it has
-	// received finishMsg{} and printed everything.
+// runProgram runs p while work runs, and returns p's final model once both
+// have ended. A signal reaches p as interruptMsg, as Ctrl+C does; a failure
+// of p stops the work.
+func (c CLI) runProgram(p *tea.Program, work func()) (tea.Model, error) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -349,11 +389,11 @@ func (c CLI) run() error {
 		select {
 		case <-sig:
 			signal.Stop(sig)
-			c.p.Send(interruptMsg{})
+			p.Send(interruptMsg{})
 		case <-done:
 		}
 	}()
-	_, err := c.p.Run()
+	final, err := p.Run()
 	if err != nil {
 		// The program failed: stop the work too.
 		c.cancel()
@@ -369,13 +409,7 @@ func (c CLI) run() error {
 	if isatty.IsTerminal(os.Stdin.Fd()) {
 		drainStdinAfterBubbletea()
 	}
-	if err != nil {
-		return err
-	}
-	if c.isCanceled() {
-		return errCanceled
-	}
-	return nil
+	return final, err
 }
 
 // isCanceled reports whether the user stopped the run.
@@ -396,10 +430,14 @@ func (c CLI) processAll() {
 	if c.isCanceled() {
 		return
 	}
+	c.renameAll(photos, true)
+}
 
-	// Rename in the order the photos were taken, so that photos taken in the
-	// same second get _1, _2, ... in that order, and the files of one shot
-	// (e.g. RAW and HEIF, with the same original name) get the same number
+// sortByTime sorts photos in the order they were taken, the order they are
+// renamed in: photos taken in the same second get _1, _2, ... in that
+// order, and the files of one shot (e.g. RAW and HEIF, with the same
+// original name) get the same number.
+func sortByTime(photos []Photo) {
 	slices.SortStableFunc(photos, func(a, b Photo) int {
 		if n := a.CreatedAt.Compare(b.CreatedAt); n != 0 {
 			return n
@@ -409,13 +447,29 @@ func (c CLI) processAll() {
 		}
 		return strings.Compare(a.Path, b.Path)
 	})
-	sidecars, warnings := findSidecars(c.fs, photos)
+}
+
+// pathsOf returns the paths of photos, the rows of the rename phase.
+func pathsOf(photos []Photo) []string {
 	keys := make([]string, len(photos))
 	for i, photo := range photos {
 		keys[i] = photo.Path
+	}
+	return keys
+}
+
+// renameAll renames photos with their sidecars, in the order they were
+// taken. announce starts the rename phase of the display, unless it was
+// made with it.
+func (c CLI) renameAll(photos []Photo, announce bool) {
+	sortByTime(photos)
+	sidecars, warnings := findSidecars(c.fs, photos)
+	for i, photo := range photos {
 		photos[i].Sidecars = sidecars[photo.Path]
 	}
-	c.sender.Send(phaseStartMsg{kind: phaseRename, keys: keys, base: c.base, into: c.into, dry: c.opt.Dryrun})
+	if announce {
+		c.sender.Send(phaseStartMsg{kind: phaseRename, keys: pathsOf(photos), base: c.base, into: c.into, dry: c.opt.Dryrun})
+	}
 	for _, w := range warnings {
 		c.sender.Send(warnMsg{name: filepath.Base(w.path), text: w.reason})
 		c.logger.Warn("sidecar not moved", "path", w.path, "reason", w.reason)
