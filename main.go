@@ -299,7 +299,7 @@ func runMain() error {
 		if err != nil {
 			return err
 		}
-		tui := newTUIModel(args, images, format, opt.DestDir, opt.Dryrun, cfg.allPresets(), cli.fs, cfgPath, cancel)
+		tui := newTUIModel(args, images, format, opt.DestDir, opt.Dryrun, opt.Clean, cfg.allPresets(), cli.fs, cfgPath, cancel)
 		return cli.runInteractive(tui)
 	}
 

@@ -43,6 +43,20 @@ type tuiDecision struct {
 	failed []failure
 }
 
+type tuiView int
+
+const (
+	viewList tuiView = iota
+	viewTree
+)
+
+func (v tuiView) String() string {
+	if v == viewTree {
+		return "tree"
+	}
+	return "list"
+}
+
 // tuiRow is one photo of the list, in the order the photos were given.
 type tuiRow struct {
 	key   string // the path the photo was read from
@@ -82,6 +96,15 @@ type tuiModel struct {
 	// sidecars are found once every photo is read
 	sidecars map[string][]string
 
+	// view is the list or the tree; folded are the directories folded in
+	// the tree, and expanded those whose runs of files are all shown
+	view     tuiView
+	folded   map[string]bool
+	expanded map[string]bool
+	// clean is --clean, and removed the directories it would remove
+	clean   bool
+	removed []string
+
 	insert  bool
 	confirm bool
 	sel     int
@@ -93,17 +116,19 @@ type tuiModel struct {
 	result  tuiResult
 }
 
-func newTUIModel(args, images []string, format, destDir string, dry bool, presets []preset, fsys FileSystem, cfgPath string, cancel func()) tuiModel {
+func newTUIModel(args, images []string, format, destDir string, dry, clean bool, presets []preset, fsys FileSystem, cfgPath string, cancel func()) tuiModel {
 	width, height := 100, 30
 	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
 		width, height = w, h
 	}
 	m := tuiModel{
-		args: args, destDir: destDir, dry: dry, fs: fsys, cfgPath: cfgPath, presets: presets, cancel: cancel,
-		byKey:   map[string]*tuiRow{},
-		width:   width,
-		height:  height,
-		spinner: spinner.New(spinner.WithSpinner(spinner.Jump), spinner.WithStyle(Cyan)),
+		args: args, destDir: destDir, dry: dry, clean: clean, fs: fsys, cfgPath: cfgPath, presets: presets, cancel: cancel,
+		byKey:    map[string]*tuiRow{},
+		folded:   map[string]bool{},
+		expanded: map[string]bool{},
+		width:    width,
+		height:   height,
+		spinner:  spinner.New(spinner.WithSpinner(spinner.Jump), spinner.WithStyle(Cyan)),
 	}
 	for _, img := range images {
 		r := &tuiRow{key: img}
@@ -132,6 +157,7 @@ func (m *tuiModel) plan() {
 		return
 	}
 	m.tplErr = ""
+	m.removed = nil
 	m.namer = newNamer(tpl, m.args, m.destDir)
 	var photos []Photo
 	for _, r := range m.rows {
@@ -147,6 +173,10 @@ func (m *tuiModel) plan() {
 		r.target = reserver.reserve(m.fs, p.Path, want)
 		r.same = r.target == p.Path
 		r.suffix = strings.TrimPrefix(strings.TrimSuffix(r.target, filepath.Ext(r.target)), strings.TrimSuffix(want, filepath.Ext(want)))
+	}
+	m.removed = nil
+	if m.clean && m.nRead == len(m.rows) {
+		m.removed = m.predictRemoved()
 	}
 }
 
@@ -175,6 +205,17 @@ func (m tuiModel) photos() []Photo {
 }
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	if tm, ok := next.(tuiModel); ok && tm.run == nil {
+		// The lines can be fewer after a photo is read or the format
+		// changes: keep the cursor on one of them
+		tm.sel = max(0, min(tm.sel, len(tm.items())-1))
+		return tm, cmd
+	}
+	return next, cmd
+}
+
+func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.run != nil {
 		next, cmd := m.run.Update(msg)
 		run, _ := next.(model)
@@ -323,13 +364,16 @@ func (m tuiModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.sel = max(0, m.sel-1)
 		return m, nil
 	case "down":
-		m.sel = min(len(m.rows)-1, m.sel+1)
+		m.sel = min(len(m.items())-1, m.sel+1)
 		return m, nil
 	case "pgup":
 		m.sel = max(0, m.sel-10)
 		return m, nil
 	case "pgdown":
-		m.sel = min(len(m.rows)-1, m.sel+10)
+		m.sel = min(len(m.items())-1, m.sel+10)
+		return m, nil
+	case "ctrl+t":
+		m.toggleView()
 		return m, nil
 	case "ctrl+s":
 		m.save()
@@ -369,13 +413,19 @@ func (m tuiModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "a":
 		m.insert, m.cursor = true, len([]rune(m.format))
 	case "j":
-		m.sel = min(len(m.rows)-1, m.sel+1)
+		m.sel = min(len(m.items())-1, m.sel+1)
 	case "k":
 		m.sel = max(0, m.sel-1)
 	case "g":
 		m.sel = 0
 	case "G":
-		m.sel = len(m.rows) - 1
+		m.sel = len(m.items()) - 1
+	case "h", "left":
+		m.fold(false)
+	case "l", "right":
+		m.fold(true)
+	case "t":
+		m.toggleView()
 	case "enter":
 		if ok, _ := m.ready(); ok {
 			m.confirm = true
@@ -384,6 +434,42 @@ func (m tuiModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.end(tuiQuit)
 	}
 	return m, nil
+}
+
+// toggleView switches between the list and the tree.
+func (m *tuiModel) toggleView() {
+	if m.view == viewList {
+		m.view = viewTree
+	} else {
+		m.view = viewList
+	}
+	m.sel = 0
+}
+
+// items returns the lines of the view, as the cursor moves on them.
+func (m tuiModel) items() []tuiItem {
+	if m.view == viewTree {
+		return m.treeItems()
+	}
+	fromW := 0
+	for _, r := range m.rows {
+		fromW = max(fromW, ansi.StringWidth(r.key))
+	}
+	fromW = min(fromW, 40)
+	items := make([]tuiItem, len(m.rows))
+	for i, r := range m.rows {
+		items[i] = tuiItem{kind: itemRow, row: r, draw: func(sel bool) string { return m.row(r, sel, fromW) }}
+	}
+	return items
+}
+
+// selected returns the photo under the cursor, if a photo is there.
+func (m tuiModel) selected() *tuiRow {
+	items := m.items()
+	if m.sel < len(items) {
+		return items[m.sel].row
+	}
+	return nil
 }
 
 // cyclePreset sets the next preset, or the previous one; from a format of
@@ -482,7 +568,7 @@ func (m tuiModel) lines(now time.Time) []string {
 	var lines []string
 	// the header
 	left := " " + Bold.Render("naminator") + "  " + fmt.Sprintf("%d %s in %s", len(m.rows), plural(len(m.rows), "photo", "photos"), m.where())
-	right := ""
+	right := Dim.Render("view: " + m.view.String() + " ")
 	if m.nRead < len(m.rows) {
 		right = m.spinner.View() + Dim.Render(fmt.Sprintf(" reading EXIF %d/%d ", m.nRead, len(m.rows)))
 	}
@@ -514,28 +600,24 @@ func (m tuiModel) lines(now time.Time) []string {
 		lines = append(lines, fitLine(m.partsLine(), w))
 	}
 
-	// the list
+	// the list or the tree
+	items := m.items()
 	n := max(3, m.viewHeight()-len(lines)-3)
-	top := min(m.top, max(0, len(m.rows)-n), m.sel)
+	top := min(m.top, max(0, len(items)-n), m.sel)
 	if m.sel >= top+n {
 		top = m.sel - n + 1
 	}
-	fromW := 0
-	for _, r := range m.rows {
-		fromW = max(fromW, ansi.StringWidth(r.key))
-	}
-	fromW = min(fromW, 40)
 	for i := range n {
 		j := top + i
-		if j >= len(m.rows) {
+		if j >= len(items) {
 			lines = append(lines, "")
 			continue
 		}
-		lines = append(lines, fitLine(m.row(m.rows[j], j == m.sel, fromW), w))
+		lines = append(lines, fitLine(items[j].draw(j == m.sel), w))
 	}
 
 	// what the photos would get, then the keys
-	lines = append(lines, spread(m.countLine(), Dim.Render(fmt.Sprintf("%d/%d ", min(top+n, len(m.rows)), len(m.rows))), w))
+	lines = append(lines, spread(m.countLine(), Dim.Render(fmt.Sprintf("%d/%d ", min(top+n, len(items)), len(items))), w))
 	lines = append(lines, fitLine("  "+m.notice, w))
 	lines = append(lines, fitLine("  "+m.help(), w))
 	return lines
@@ -554,19 +636,27 @@ func (m tuiModel) base() string {
 	if m.namer == nil || len(m.rows) == 0 {
 		return ""
 	}
-	r := m.rows[m.sel]
+	r := m.selected()
+	if r == nil {
+		r = m.rows[0]
+	}
 	p := r.photo
 	if !r.read {
 		p = Photo{Path: r.key, Dir: filepath.Dir(r.key)}
 	}
-	dir := abbrevHome(absPath(m.namer.output(p)), os.Getenv("HOME"))
-	// A long one would push the format away: keep its last two directories
+	return m.shortDir(absPath(m.namer.output(p))) + "/"
+}
+
+// shortDir shows dir from the home directory, and only its last two
+// directories when it is long, so that it does not push the rest away.
+func (m tuiModel) shortDir(dir string) string {
+	dir = abbrevHome(dir, os.Getenv("HOME"))
 	if ansi.StringWidth(dir) > m.width/3 {
 		if parts := strings.Split(dir, string(filepath.Separator)); len(parts) > 2 {
 			dir = iconEllipsis + string(filepath.Separator) + filepath.Join(parts[len(parts)-2:]...)
 		}
 	}
-	return dir + "/"
+	return dir
 }
 
 // formatView draws the format: placeholders in magenta, unknown or
@@ -617,8 +707,10 @@ func (m tuiModel) partsLine() string {
 	if len(m.rows) == 0 {
 		return ""
 	}
-	r := m.rows[m.sel]
+	r := m.selected()
 	switch {
+	case r == nil:
+		return "  " + Dim.Render("a directory: h folds it, l opens it")
 	case !r.read:
 		return "  " + Dim.Render("reading EXIF of the selected photo…")
 	case r.err != "":
@@ -710,6 +802,9 @@ func (m tuiModel) countLine() string {
 	if failed > 0 {
 		parts = append(parts, Red.Render(fmt.Sprintf("%d without a shooting time", failed)))
 	}
+	if n := len(m.removed); n > 0 {
+		parts = append(parts, Dim.Render(fmt.Sprintf("%d %s removed", n, plural(n, "directory", "directories"))))
+	}
 	return "  " + joinDim(parts)
 }
 
@@ -725,13 +820,20 @@ func (m tuiModel) help() string {
 	}
 	key := func(k, what string) string { return k + Dim.Render(" "+what) }
 	if m.insert {
-		return strings.Join([]string{key("esc/enter", "done"), key("tab", "preset"), key("←/→", "cursor"), key("↑/↓", "move"), key("ctrl+s", "save")}, Dim.Render(" • "))
+		return strings.Join([]string{key("esc/enter", "done"), key("tab", "preset"), key("←/→", "cursor"), key("↑/↓", "move"), key("ctrl+t", "tree"), key("ctrl+s", "save")}, Dim.Render(" • "))
 	}
 	enter := key("enter", "rename")
 	if ok, why := m.ready(); !ok {
 		enter = Dim.Render("enter rename (" + why + ")")
 	}
-	return strings.Join([]string{key("i", "edit format"), key("tab", "preset"), key("j/k", "move"), enter, key("ctrl+s", "save"), key("q", "quit")}, Dim.Render(" • "))
+	keys := []string{key("i", "edit format"), key("tab", "preset"), key("j/k", "move")}
+	if m.view == viewTree {
+		keys = append(keys, key("h/l", "fold"), key("t", "list"))
+	} else {
+		keys = append(keys, key("t", "tree"))
+	}
+	keys = append(keys, enter, key("ctrl+s", "save"), key("q", "quit"))
+	return strings.Join(keys, Dim.Render(" • "))
 }
 
 // spread puts left and right on one line of width cells.

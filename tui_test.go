@@ -30,7 +30,7 @@ func newTestTUI(t *testing.T, n int) (tuiModel, []Photo) {
 		photos = append(photos, Photo{Name: filepath.Base(path), Path: path, Dir: "card", Extension: "jpg", CreatedAt: taken})
 	}
 	cfg := config{}
-	m := newTUIModel([]string{"card"}, images, presets[0].format, "", false, cfg.allPresets(), osFS{}, filepath.Join(t.TempDir(), "config.yaml"), nil)
+	m := newTUIModel([]string{"card"}, images, presets[0].format, "", false, false, cfg.allPresets(), osFS{}, filepath.Join(t.TempDir(), "config.yaml"), nil)
 	m.width, m.height = 100, 30
 	return m, photos
 }
@@ -247,8 +247,12 @@ func TestTUIView(t *testing.T) {
 	m = m.send(t, readAll(photos[:20])...)
 	for _, size := range [][2]int{{100, 30}, {60, 14}, {140, 50}} {
 		m.width, m.height = size[0], size[1]
-		for _, insert := range []bool{false, true} {
-			m.insert = insert
+		for _, mode := range []struct {
+			insert bool
+			view   tuiView
+		}{{false, viewList}, {true, viewList}, {false, viewTree}} {
+			m.insert, m.view = mode.insert, mode.view
+			insert := mode.insert
 			lines := m.lines(time.Now())
 			if len(lines) > m.viewHeight() || len(lines)+1 > max(size[1], 13) {
 				t.Errorf("%v insert=%v: %d lines", size, insert, len(lines))
@@ -311,5 +315,145 @@ func TestStartFormat(t *testing.T) {
 	}
 	if err := checkInteractive(Option{GroupByDate: true}); err == nil {
 		t.Error("-i with -t should be an error")
+	}
+}
+
+// newCardsTUI returns a screen over two card folders in a temporary
+// directory, all read, with --clean: card1 left empty, card2 keeping a
+// photo without a shooting time.
+func newCardsTUI(t *testing.T) tuiModel {
+	t.Helper()
+	root := t.TempDir()
+	at := time.Date(2026, 10, 4, 9, 0, 0, 0, time.UTC)
+	var images []string
+	var msgs []tea.Msg
+	for i := range 8 {
+		card := "card1"
+		if i >= 6 {
+			card = "card2"
+		}
+		name := fmt.Sprintf("DSC%04d.JPG", i)
+		makeTree(t, root, card+"/"+name)
+		path := filepath.Join(root, card, name)
+		images = append(images, path)
+		p := Photo{Name: name, Path: path, Dir: filepath.Join(root, card), Extension: "jpg", CreatedAt: at.Add(time.Duration(i) * time.Minute)}
+		if i == 7 {
+			msgs = append(msgs, exifResultMsg{image: path, photo: Photo{Path: path}, err: errors.New("no date")})
+			continue
+		}
+		msgs = append(msgs, exifResultMsg{image: path, photo: p})
+	}
+	cfg := config{}
+	m := newTUIModel([]string{filepath.Join(root, "card1"), filepath.Join(root, "card2")}, images, "{ext}/{date}/{date}_{time}", "", false, true, cfg.allPresets(), osFS{}, filepath.Join(root, "config.yaml"), nil)
+	m.width, m.height = 120, 40
+	return m.send(t, msgs...)
+}
+
+func treeText(m tuiModel) []string {
+	var out []string
+	for _, it := range m.items() {
+		out = append(out, ansi.Strip(it.draw(false)))
+	}
+	return out
+}
+
+func TestTUITree(t *testing.T) {
+	m := newCardsTUI(t)
+	m = m.send(t, keys("t")...)
+	if m.view != viewTree {
+		t.Fatal("t should show the tree")
+	}
+	got := strings.Join(treeText(m), "\n")
+	for _, want := range []string{
+		"card1/  (removed by -c)",
+		"card2/  1 · 1 to check",
+		"DSC0007.JPG  (no shooting time)",
+		"jpg/  7",
+		"2026-10-04/  7",
+		"2026-10-04_09-00-00.jpg  ← ",
+		"⋯ 4 more files",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("tree lacks %q:\n%s", want, got)
+		}
+	}
+	if !strings.Contains(m.countLine(), "1 directory removed") {
+		t.Errorf("count line = %q", ansi.Strip(m.countLine()))
+	}
+	// the parts line says what to do on a directory
+	if !strings.Contains(m.partsLine(), "h folds it") {
+		t.Errorf("parts line on the top = %q", ansi.Strip(m.partsLine()))
+	}
+}
+
+// A directory folded earlier can become the top of the tree when the
+// format changes: the top is never folded, and l on it opens everything.
+// The cursor stays on a line when the tree gets shorter.
+func TestTUITreeAfterFormatChange(t *testing.T) {
+	m := newCardsTUI(t).send(t, keys("t")...)
+	// fold every directory, then pick a format with fewer of them
+	m = m.send(t, keys("g", "h", "G")...)
+	for _, it := range m.items() {
+		if it.kind == itemDir {
+			m.folded[it.path] = true
+		}
+	}
+	m.setFormat("{date}_{time}")
+	m = m.send(t, keys("G", "g")...)
+	m = m.send(t, keys("l")...)
+	if !strings.Contains(strings.Join(treeText(m), "\n"), "2026-10-04_09-00-00.jpg") {
+		t.Errorf("l on the top should open everything:\n%s", strings.Join(treeText(m), "\n"))
+	}
+	// the cursor at the end, then fewer lines
+	m = m.send(t, keys("G")...)
+	m = m.send(t, keys("g", "h")...)
+	m.sel = 999
+	m = m.send(t, tea.WindowSizeMsg{Width: 120, Height: 40})
+	if n := len(m.items()); m.sel >= n {
+		t.Errorf("sel = %d with %d lines", m.sel, n)
+	}
+}
+
+func TestTUITreeFold(t *testing.T) {
+	m := newCardsTUI(t).send(t, keys("t")...)
+	find := func(m tuiModel, text string) int {
+		for i, line := range treeText(m) {
+			if strings.Contains(line, text) {
+				return i
+			}
+		}
+		t.Fatalf("no line with %q:\n%s", text, strings.Join(treeText(m), "\n"))
+		return -1
+	}
+	// l on a "more" line shows the files it hides; h on one of them folds
+	// them again and goes up to their directory
+	m.sel = find(m, "more files")
+	m = m.send(t, keys("l")...)
+	if strings.Contains(strings.Join(treeText(m), "\n"), "more files") {
+		t.Fatal("l should show the hidden files")
+	}
+	m.sel = find(m, "09-03-00")
+	m = m.send(t, keys("h")...)
+	if !strings.Contains(strings.Join(treeText(m), "\n"), "more files") || !strings.Contains(treeText(m)[m.sel], "2026-10-04/") {
+		t.Fatalf("h should fold the files and go up: sel on %q", treeText(m)[m.sel])
+	}
+	// h folds an open directory, l opens it again
+	m = m.send(t, keys("h")...)
+	if strings.Contains(strings.Join(treeText(m), "\n"), "2026-10-04_09-00-00") || !strings.Contains(treeText(m)[m.sel], "▸") {
+		t.Fatal("h should fold the directory")
+	}
+	m = m.send(t, keys("l")...)
+	if !strings.Contains(strings.Join(treeText(m), "\n"), "2026-10-04_09-00-00") {
+		t.Fatal("l should open the directory")
+	}
+	// on the top line, h folds every directory
+	m = m.send(t, keys("g", "h")...)
+	if n := len(m.items()); n != 4 {
+		t.Errorf("after folding all: %d lines:\n%s", n, strings.Join(treeText(m), "\n"))
+	}
+	// h and l do nothing in the list
+	m = m.send(t, keys("t", "j", "h")...)
+	if m.view != viewList || m.sel != 1 {
+		t.Errorf("view = %v, sel = %d", m.view, m.sel)
 	}
 }
