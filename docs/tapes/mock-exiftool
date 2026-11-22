@@ -23,6 +23,10 @@ for line in sys.stdin:
     if line != "-execute":
         args.append(line)
         continue
+    if "-stay_open" in args:
+        # "-stay_open False": the caller is closing; exit at once as
+        # exiftool does, rather than read "False" as a file
+        break
     out = []
     for path in (a for a in args if not a.startswith("-")):
         name = os.path.basename(path)
@@ -35,6 +39,4 @@ for line in sys.stdin:
         out.append(info)
     sys.stdout.write(json.dumps(out) + "\n{ready}\n")
     sys.stdout.flush()
-    if "False" in args:
-        break
     args = []
