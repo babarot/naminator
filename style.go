@@ -17,6 +17,9 @@ var (
 	Magenta lipgloss.Style
 	Bold    lipgloss.Style
 	Dim     lipgloss.Style
+
+	// styled is false when the styles are plain (NO_COLOR, no terminal)
+	styled bool
 )
 
 func init() {
@@ -27,6 +30,7 @@ func init() {
 }
 
 func enableStyles() {
+	styled = true
 	Green = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 	Red = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	Yellow = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
@@ -40,6 +44,7 @@ func enableStyles() {
 // disableStyles makes every style plain text, for NO_COLOR and for output
 // that is not a terminal.
 func disableStyles() {
+	styled = false
 	Green = lipgloss.NewStyle()
 	Red = lipgloss.NewStyle()
 	Yellow = lipgloss.NewStyle()

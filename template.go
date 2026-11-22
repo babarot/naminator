@@ -138,14 +138,15 @@ func (p Photo) value(key, dir string) string {
 var presets = []struct {
 	name   string
 	format string
+	flags  string // the flags it stands for
 }{
-	{"date and time", "{dir}/{date}_{time}"},
-	{"by date", "{date}/{date}_{time}"},                       // -t
-	{"by extension", "{ext}/{date}_{time}"},                   // -e
-	{"by date, then extension", "{date}/{ext}/{date}_{time}"}, // -t -e
-	{"by extension, then date", "{ext}/{date}/{date}_{time}"}, // -t -e -E
-	{"keep the original name", "{date}/{time}_{orig}"},
-	{"numbered by camera", "{camera}/{date}_{seq}"},
+	{"date and time", "{dir}/{date}_{time}", ""},
+	{"by date", "{date}/{date}_{time}", "-t"},
+	{"by extension", "{ext}/{date}_{time}", "-e"},
+	{"by date, then extension", "{date}/{ext}/{date}_{time}", "-t -e"},
+	{"by extension, then date", "{ext}/{date}/{date}_{time}", "-t -e -E"},
+	{"keep the original name", "{date}/{time}_{orig}", ""},
+	{"numbered by camera", "{camera}/{date}_{seq}", ""},
 }
 
 // namer gives each photo its path: the template rendered under the output
