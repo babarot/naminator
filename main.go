@@ -33,12 +33,13 @@ var (
 
 // Option struct with the new GroupExtFirst flag
 type Option struct {
-	Interactive   bool       `short:"i" long:"interactive" description:"Preview the new paths and choose the format before renaming"`
+	Interactive   bool       `short:"i" long:"interactive" hidden:"yes" description:"Preview the new paths and choose the format before renaming (the default in a terminal)"`
 	Format        string     `short:"f" long:"format" description:"The path to rename photos to, as {ext}/{date}/{date}_{time}"`
 	Preset        string     `short:"p" long:"preset" description:"The format of a preset, by name, as \"by extension, then date\""`
 	DestDir       string     `short:"d" long:"dest-dir" description:"The directory path where renamed photos will be moved" default:""`
 	Dryrun        bool       `short:"n" long:"dry-run" description:"Simulate the command's actions without executing them"`
 	Clean         bool       `short:"c" long:"clean" description:"Remove empty directories after renaming"`
+	Yes           bool       `short:"y" long:"yes" description:"Rename without asking, also in a terminal"`
 	GroupByDate   bool       `short:"t" long:"group-by-date" description:"Deprecated: use --preset \"by date\""`
 	GroupByExt    bool       `short:"e" long:"group-by-ext" description:"Deprecated: use --preset \"by extension\""`
 	GroupExtFirst bool       `short:"E" long:"group-ext-first" description:"Deprecated: with -t and -e, use --preset \"by extension, then date\""`
@@ -230,6 +231,9 @@ func runMain() error {
 	}
 	var namer *namer
 	var note string
+	// The screen needs a terminal both ways: with stdin from a file or a
+	// pipe, the run is unattended and must not wait for a key
+	opt.Interactive = interactive(opt, isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()))
 	if !opt.Interactive {
 		namer, note, err = chooseNamer(opt, cfg, args)
 		if err != nil {

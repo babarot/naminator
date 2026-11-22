@@ -9,6 +9,17 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+// interactive reports whether the run opens the interactive screen: in a
+// terminal, unless --yes or the flags going away (-t, -e, -E) are given,
+// which rename without asking as before; or when -i asks for it.
+func interactive(opt Option, terminal bool) bool {
+	if opt.Interactive {
+		return true
+	}
+	legacy := opt.GroupByDate || opt.GroupByExt || opt.GroupExtFirst
+	return terminal && !opt.Yes && !legacy
+}
+
 // checkInteractive reports flags that cannot be used with -i.
 func checkInteractive(opt Option) error {
 	if opt.GroupByDate || opt.GroupByExt || opt.GroupExtFirst {
@@ -35,10 +46,16 @@ func startFormat(opt Option, cfg config, args []string) (string, error) {
 		return cfg.findPreset(opt.Preset)
 	}
 	inPlace := presets[0].format
-	if onlyFiles(args) || cfg.Format == "" {
+	switch {
+	case onlyFiles(args):
 		return inPlace, nil
+	case cfg.Format != "":
+		return cfg.Format, nil
+	case opt.DestDir != "":
+		// into the destination as they are, as -d alone has always done
+		return "{date}_{time}", nil
 	}
-	return cfg.Format, nil
+	return inPlace, nil
 }
 
 // onlyFiles reports whether every argument is a file, not a directory.

@@ -59,8 +59,6 @@ Usage:
   naminator [OPTIONS] [files... | dirs...]
 
 Application Options:
-  -i, --interactive       Preview the new paths and choose the format before
-                          renaming
   -f, --format=           The path to rename photos to, as
                           {ext}/{date}/{date}_{time}
   -p, --preset=           The format of a preset, by name, as "by extension,
@@ -68,6 +66,7 @@ Application Options:
   -d, --dest-dir=         The directory path where renamed photos will be moved
   -n, --dry-run           Simulate the command's actions without executing them
   -c, --clean             Remove empty directories after renaming
+  -y, --yes               Rename without asking, also in a terminal
   -t, --group-by-date     Deprecated: use --preset "by date"
   -e, --group-by-ext      Deprecated: use --preset "by extension"
   -E, --group-ext-first   Deprecated: with -t and -e, use --preset "by
@@ -82,6 +81,21 @@ Help Options:
 ```
 
 Pass directories containing images as arguments, and rename the images based on their EXIF data. The renaming will occur within the same directories.
+
+In a terminal, naminator first opens a screen that lists the path each photo would get, as the EXIF data is read. Nothing is renamed until you press `enter` and then `y`; `q` quits without renaming.
+
+| Key | |
+|---|---|
+| `tab` / `shift+tab` | Go through the presets |
+| `i` / `a` | Edit the format (`esc` or `enter` to finish) |
+| `j` / `k`, `g` / `G` | Move |
+| `t` | Switch between the list and a tree of the directories as they will be |
+| `h` / `l` | Fold or open a directory in the tree |
+| `m` | Use the file's modification time for a photo without a shooting time |
+| `ctrl+s` | Save the format as the default in the configuration |
+| `enter` | Rename, after asking |
+
+`--yes`, or running without a terminal for input and output (in a pipe, with input from a file, in a script or CI), renames without asking.
 
 ### Format
 
