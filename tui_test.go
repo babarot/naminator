@@ -687,3 +687,27 @@ func TestTUIWhere(t *testing.T) {
 		t.Errorf("where = %q", got)
 	}
 }
+
+// On a low terminal the screen leaves lines out rather than get taller
+// than the terminal, whose top would then be cut off.
+func TestTUILowTerminal(t *testing.T) {
+	m, photos := newTestTUI(t, 30)
+	m = m.send(t, readAll(photos)...)
+	m = m.send(t, cursorWaitedMsg{})
+	for h := 8; h <= 14; h++ {
+		for _, mode := range []struct {
+			view   tuiView
+			format string
+		}{{viewList, presets[0].format}, {viewTree, presets[0].format}, {viewList, "{nope}"}} {
+			m.height, m.view = h, mode.view
+			m.setFormat(mode.format)
+			lines := m.lines(time.Now())
+			if len(lines) > h-1 {
+				t.Errorf("height %d, %v, %q: %d lines", h, mode.view, mode.format, len(lines))
+			}
+			if !strings.Contains(ansi.Strip(lines[len(lines)-1]), "q quit") && !strings.Contains(ansi.Strip(lines[len(lines)-1]), "enter") {
+				t.Errorf("height %d: the last line should be the keys, got %q", h, ansi.Strip(lines[len(lines)-1]))
+			}
+		}
+	}
+}

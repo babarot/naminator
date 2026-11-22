@@ -660,7 +660,25 @@ func saveFormat(path, format string) error {
 // has, within the screen less the header, the format's box, the parts,
 // the counts, a line and the keys.
 func (m tuiModel) listHeight() int {
-	return max(3, min(len(m.items()), m.maxHeight()-8))
+	return max(0, min(len(m.items()), m.maxHeight()-m.fixedLines()))
+}
+
+// tight reports whether the terminal is too low for every line: the parts
+// and the notice are then left out.
+func (m tuiModel) tight() bool {
+	return m.height > 0 && m.height-1 < 11
+}
+
+// fixedLines counts the lines besides the list: the header, the format's
+// box, the parts, the counts, a line and the keys; two fewer when tight.
+func (m tuiModel) fixedLines() int {
+	switch {
+	case m.tight() && m.tplErr != "":
+		return 7 // the error stays
+	case m.tight():
+		return 6
+	}
+	return 8
 }
 
 // resetSGR matches the resets of the styles, after which the background of
@@ -687,7 +705,7 @@ func (m tuiModel) highlight(line string, width int) string {
 
 // viewHeight is how many lines the screen takes: what it has to show.
 func (m tuiModel) viewHeight() int {
-	return m.listHeight() + 8
+	return m.listHeight() + m.fixedLines()
 }
 
 // maxHeight is the most lines the screen takes, as gomi's "auto" height:
@@ -698,7 +716,12 @@ func (m tuiModel) maxHeight() int {
 	if m.cursorY >= 0 {
 		n = max(n, m.height-m.cursorY)
 	}
-	return max(11, min(n, m.height)-1)
+	n = max(11, min(n, m.height)-1)
+	if m.height > 0 {
+		// never taller than the terminal, less the cursor's line
+		n = min(n, m.height-1)
+	}
+	return n
 }
 
 func (m tuiModel) View() tea.View {
@@ -747,8 +770,11 @@ func (m tuiModel) lines(now time.Time) []string {
 	lines = append(lines, border.Render("│")+padRight(body, inner)+border.Render("│"))
 	lines = append(lines, border.Render("╰"+strings.Repeat("─", max(0, inner))+"╯"))
 
-	// the parts of the selected photo, or what is wrong with the format
-	if m.tplErr != "" {
+	// the parts of the selected photo, or what is wrong with the format;
+	// the error stays on a low terminal, the parts do not
+	if m.tight() && m.tplErr == "" {
+		// left out
+	} else if m.tplErr != "" {
 		lines = append(lines, fitLine("  "+Red.Render(iconError+" "+m.tplErr), w))
 	} else {
 		lines = append(lines, fitLine(m.partsLine(), w))
@@ -775,7 +801,9 @@ func (m tuiModel) lines(now time.Time) []string {
 
 	// what the photos would get, then the keys
 	lines = append(lines, spread(m.countLine(), Dim.Render(fmt.Sprintf("%d/%d ", min(top+n, len(items)), len(items))), w))
-	lines = append(lines, fitLine("  "+m.notice, w))
+	if !m.tight() {
+		lines = append(lines, fitLine("  "+m.notice, w))
+	}
 	lines = append(lines, fitLine("  "+m.help(), w))
 	return lines
 }
