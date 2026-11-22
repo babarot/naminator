@@ -594,3 +594,68 @@ func TestStartFormatWithDest(t *testing.T) {
 		t.Errorf("with a config: %q", got)
 	}
 }
+
+// The screen takes the lines it has to show, at most half the terminal or
+// the rows from the prompt down, as gomi's; nothing is drawn until the
+// terminal tells where the prompt is, or the wait is over.
+func TestTUIHeight(t *testing.T) {
+	m, photos := newTestTUI(t, 3)
+	m.width, m.height = 100, 40
+	m = m.send(t, readAll(photos)...)
+	if m.View().Content != "" {
+		t.Fatal("nothing should be drawn before the cursor position")
+	}
+	m = m.send(t, cursorWaitedMsg{})
+	if got := len(m.lines(time.Now())); got != 3+8 {
+		t.Errorf("3 photos: %d lines, want %d", got, 3+8)
+	}
+
+	many, photos := newTestTUI(t, 100)
+	many.width, many.height = 100, 40
+	many = many.send(t, readAll(photos)...)
+	many = many.send(t, cursorWaitedMsg{})
+	if got := len(many.lines(time.Now())); got != 40/2-1 {
+		t.Errorf("100 photos, cursor unknown: %d lines, want %d", got, 40/2-1)
+	}
+	// the prompt near the top: the rows from it down
+	many = many.send(t, tea.CursorPositionMsg{X: 0, Y: 5})
+	if got := len(many.lines(time.Now())); got != 40-5-1 {
+		t.Errorf("100 photos, prompt on row 5: %d lines, want %d", got, 40-5-1)
+	}
+	// the prompt near the bottom: half the terminal
+	many = many.send(t, tea.CursorPositionMsg{X: 0, Y: 35})
+	if got := len(many.lines(time.Now())); got != 40/2-1 {
+		t.Errorf("100 photos, prompt on row 35: %d lines, want %d", got, 40/2-1)
+	}
+}
+
+// Photos already named are not renamed: with nothing to move, enter does
+// not ask, and the question counts only the photos that move.
+func TestTUIConfirmCountsMoves(t *testing.T) {
+	m, photos := newTestTUI(t, 2)
+	for i := range photos {
+		p := &photos[i]
+		p.Name = p.CreatedAt.Format("2006-01-02_15-04-05") + ".jpg"
+		p.Path = filepath.Join("card", p.Name)
+		m.rows[i].key = p.Path
+		m.byKey[p.Path] = m.rows[i]
+	}
+	m = m.send(t, readAll(photos)...)
+	m = m.send(t, keys("enter")...)
+	if m.confirm || !strings.Contains(ansi.Strip(m.help()), "nothing to rename") {
+		t.Errorf("confirm = %v, help = %q", m.confirm, ansi.Strip(m.help()))
+	}
+	m.setFormat("{date}/{date}_{time}")
+	m = m.send(t, keys("enter")...)
+	if !m.confirm || !strings.Contains(ansi.Strip(m.help()), "Rename 2 photos?") {
+		t.Errorf("confirm = %v, help = %q", m.confirm, ansi.Strip(m.help()))
+	}
+}
+
+func TestTUIWhere(t *testing.T) {
+	t.Setenv("HOME", "/home/u")
+	m := tuiModel{args: []string{"/home/u/Desktop/photos/", "card"}}
+	if got := m.where(); got != "~/Desktop/photos, card" {
+		t.Errorf("where = %q", got)
+	}
+}
