@@ -172,8 +172,12 @@ func (m tuiModel) treeItems() []tuiItem {
 		}
 		return "  "
 	}
+	rootMark := "▾ "
+	if m.folded[root.path] {
+		rootMark = "▸ "
+	}
 	items := []tuiItem{{kind: itemRoot, path: root.path, draw: func(sel bool) string {
-		return lead(sel) + Dim.Render("▾ ") + Blue.Render(root.name+"/") + root.countText()
+		return lead(sel) + Dim.Render(rootMark) + Blue.Render(root.name+"/") + root.countText()
 	}}}
 	var walk func(d *treeDir, prefix string)
 	walk = func(d *treeDir, prefix string) {
@@ -257,8 +261,10 @@ func (m tuiModel) treeItems() []tuiItem {
 			}
 		}
 	}
-	// The top is never folded: what is under it can always be opened
-	walk(root, "")
+	// The top folds too; l on it opens everything again
+	if !m.folded[root.path] {
+		walk(root, "")
+	}
 	return items
 }
 
@@ -323,13 +329,20 @@ func (m *tuiModel) fold(open bool) {
 	it := items[m.sel]
 	switch {
 	case it.kind == itemRoot && open:
-		// open everything, also what a format before folded
+		// open everything, the top and what a format before folded included
 		clear(m.folded)
 	case it.kind == itemRoot:
+		// fold the directories under the top; when there are none left to
+		// fold, the top itself
+		folded := false
 		for _, sub := range items {
-			if sub.kind == itemDir {
+			if sub.kind == itemDir && !m.folded[sub.path] {
 				m.folded[sub.path] = true
+				folded = true
 			}
+		}
+		if !folded {
+			m.folded[it.path] = true
 		}
 	case open && it.kind == itemDir:
 		if m.folded[it.path] {

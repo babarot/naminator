@@ -416,6 +416,34 @@ func TestTUITreeAfterFormatChange(t *testing.T) {
 	}
 }
 
+// A tree without directories under its top folds the top itself, and l
+// on it opens everything again.
+func TestTUITreeFoldTop(t *testing.T) {
+	m, photos := newTestTUI(t, 10)
+	m = m.send(t, readAll(photos)...)
+	m = m.send(t, keys("t")...)
+	if n := len(m.items()); n < 3 {
+		t.Fatalf("tree has %d lines", n)
+	}
+	m = m.send(t, keys("g", "h")...)
+	if n := len(m.items()); n != 1 || !strings.Contains(treeText(m)[0], "▸") {
+		t.Fatalf("h on the top should fold it:\n%s", strings.Join(treeText(m), "\n"))
+	}
+	m = m.send(t, keys("l")...)
+	if n := len(m.items()); n < 3 || !strings.Contains(treeText(m)[0], "▾") {
+		t.Fatalf("l on the top should open it:\n%s", strings.Join(treeText(m), "\n"))
+	}
+	// the arrows do the same
+	m = m.send(t, tea.KeyPressMsg{Code: tea.KeyLeft})
+	if len(m.items()) != 1 {
+		t.Error("← should fold the top")
+	}
+	m = m.send(t, tea.KeyPressMsg{Code: tea.KeyRight})
+	if len(m.items()) < 3 {
+		t.Error("→ should open the top")
+	}
+}
+
 func TestTUITreeFold(t *testing.T) {
 	m := newCardsTUI(t).send(t, keys("t")...)
 	find := func(m tuiModel, text string) int {
