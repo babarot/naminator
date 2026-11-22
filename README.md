@@ -7,7 +7,7 @@ Renaming multiple photo files (JPG, PNG, TIFF, GIF, RAW, ...) based on their EXI
 
 This tool is heavily inspired by [Photo Naminator](https://apps.apple.com/us/app/photo-naminator/id1598189356).
 
-![](./docs/demo-1.gif)
+![](./docs/demo.gif)
 
 ## Dependencies
 

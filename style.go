@@ -1,15 +1,54 @@
 package main
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"os"
 
+	"charm.land/lipgloss/v2"
+)
+
+// The styles follow gh-infra's: the terminal's own ANSI colors, so they suit
+// its theme.
 var (
-	spinnerStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("63"))
-	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Margin(1, 0)
-	dotStyle      = helpStyle.UnsetMargins()
-	durationStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFDD0")) // FFF9B1
-	dryrunStyle   = dotStyle
-	okStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#BBE896"))
-	warnStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFC999"))
-	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#D94F70"))
-	appStyle      = lipgloss.NewStyle().Margin(1, 2, 0, 2)
+	Green  lipgloss.Style
+	Red    lipgloss.Style
+	Yellow lipgloss.Style
+	Cyan   lipgloss.Style
+	Bold   lipgloss.Style
+	Dim    lipgloss.Style
+)
+
+func init() {
+	enableStyles()
+	if _, ok := os.LookupEnv("NO_COLOR"); ok {
+		disableStyles()
+	}
+}
+
+func enableStyles() {
+	Green = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	Red = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	Yellow = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	Cyan = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	Bold = lipgloss.NewStyle().Bold(true)
+	Dim = lipgloss.NewStyle().Faint(true)
+}
+
+// disableStyles makes every style plain text, for NO_COLOR and for output
+// that is not a terminal.
+func disableStyles() {
+	Green = lipgloss.NewStyle()
+	Red = lipgloss.NewStyle()
+	Yellow = lipgloss.NewStyle()
+	Cyan = lipgloss.NewStyle()
+	Bold = lipgloss.NewStyle()
+	Dim = lipgloss.NewStyle()
+}
+
+const (
+	iconSuccess  = "✓"
+	iconError    = "✗"
+	iconChange   = "~"
+	iconRemove   = "-"
+	iconQueued   = "·"
+	iconEllipsis = "…"
 )

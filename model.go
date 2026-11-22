@@ -1,218 +1,228 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/progress"
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"
 )
 
-const maxHeight = 30
-
+// model draws the run in the terminal, after gh-infra's spinner display. A
+// phase with few rows is drawn whole (fullView). One with many, or that does
+// not fit, is compact: its title and finished rows are printed above the
+// view with tea.Println, where they stay in the scrollback, and the view
+// keeps a fixed height. A view taller than the terminal cannot be redrawn by
+// the inline renderer: its top lines scroll away and leave broken copies.
+//
+// When a phase is over, what the view showed of it is printed above, and
+// the next phase is drawn below it. At the end the failures are printed in
+// full and the view is left empty.
 type model struct {
-	progress     progress.Model
-	spinner      spinner.Model
-	quitting     bool
-	results      []resultMsg
-	errorResults []resultMsg
-	startTime    time.Time
-	files        map[string]state
-	total        int
-	height       int
-	// showProgress is decided once, when showProgressSet becomes true
-	showProgress    bool
-	showProgressSet bool
+	phase    *phase
+	failures []failure
+	spinner  spinner.Model
+	width    int
+	height   int // 0 when unknown
+	queue    []string
+	printing bool // a batch of queue is being printed
+	finished bool // finishMsg came: the view is empty and quits once printed
+	stopped  bool // Ctrl+C was pressed
+	cancel   func()
+	now      func() time.Time
 }
 
-type state uint8
+// printedMsg reports that a batch of queued lines has been printed.
+type printedMsg struct{}
 
-const (
-	succeeded state = iota
-	failed
-)
+// interruptMsg reports a SIGINT or SIGTERM from outside (kill, or ^C when
+// the input is not a terminal); the model stops as on Ctrl+C. The program
+// runs without bubbletea's signal handler, which would end it at once,
+// before the model could show what was canceled.
+type interruptMsg struct{}
 
-func newModel(total int) model {
-	s := spinner.New(
-		spinner.WithSpinner(spinner.Line),
-		spinner.WithStyle(spinnerStyle),
-	)
-	_, termHeight, _ := term.GetSize(int(os.Stdout.Fd()))
-	minHeight := termHeight - 9
-	if minHeight < 0 {
-		minHeight = 1
+// newModel returns the model showing first, the first phase. cancel is
+// called on Ctrl+C to stop the work.
+func newModel(first phaseStartMsg, cancel func()) model {
+	width, height := 80, 0
+	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		width, height = w, h
 	}
-	height := min(total, minHeight, maxHeight)
-	return model{
-		progress:     progress.New(progress.WithDefaultGradient()),
-		spinner:      s,
-		quitting:     false,
-		results:      make([]resultMsg, height),
-		errorResults: nil,
-		startTime:    time.Now(),
-		files:        map[string]state{},
-		total:        total,
-		height:       height,
+	m := model{
+		spinner: spinner.New(
+			spinner.WithSpinner(spinner.Jump),
+			spinner.WithStyle(Cyan),
+		),
+		width:  width,
+		height: height,
+		cancel: cancel,
+		now:    time.Now,
 	}
+	m.phase = newPhase(first, m.now())
+	return m
+}
+
+// startCompact makes the first phase compact when it should be from the
+// start, and returns its title to print before the program runs: a
+// tea.Println sent before the first frame is drawn lands at the top of the
+// screen, and that frame then erases what is below it.
+func (m *model) startCompact() string {
+	if !m.phase.wantCompact(m.height) {
+		return ""
+	}
+	m.phase.compact = true
+	return m.phase.title() + "\n"
 }
 
 func (m model) Init() tea.Cmd {
 	return m.spinner.Tick
 }
 
-// replaceFirstNilOrAppend finds the first nil element in m.results and replaces it with msg.
-// If no nil element is found, it removes the oldest element and appends msg at the end.
-// This ensures that messages fit within the allocated space while keeping recent ones visible.
-func (m *model) replaceFirstNilOrAppend(msg resultMsg) {
-	found := false
-	for i, result := range m.results {
-		if result == nil {
-			m.results[i] = msg
-			found = true
-			break
-		}
-	}
-	// If no nil element was found, remove the oldest message and append the new one.
-	if !found {
-		m.results = append(m.results[1:], msg)
-	}
-}
-
-// trimNonErrorMessageAndAppend removes the first non-error message (or nil) from m.results
-// while ensuring error messages are retained. If all messages contain errors, it removes
-// the oldest one instead. This function maintains a balance between highlighting errors
-// and allowing new messages to be displayed.
-func (m *model) trimNonErrorMessageAndAppend(msg resultMsg) {
-	var newResults []resultMsg
-	met := false
-
-	// Iterate through m.results and remove the first non-error message (or nil).
-	for _, result := range m.results {
-		if !met && (result == nil || result.Err() == nil) {
-			// Skip the first encountered non-error message (or nil) to make space for new messages.
-			met = true
-			continue
-		}
-		newResults = append(newResults, result)
-	}
-
-	// Ensure the number of messages does not exceed the allowed height.
-	if len(newResults) >= m.height {
-		// If the list exceeds the allowed height, trim the oldest messages before appending the new one.
-		newResults = append(newResults[len(newResults)-m.height+1:], msg)
-	} else {
-		// Otherwise, simply append the new message.
-		newResults = append(newResults, msg)
-	}
-	m.results = newResults
-}
-
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		return m, m.settle()
+
+	case phaseStartMsg:
+		m.endPhase()
+		m.phase = newPhase(msg, m.now())
+		if m.phase.wantCompact(m.height) {
+			m.phase.compact = true
+			m.queue = append(m.queue, m.phase.title(), "")
+		}
+		return m, m.settle()
+
+	case exifStartMsg, exifResultMsg, renameResultMsg, cleanResultMsg:
+		if _, f := m.phase.apply(msg, m.now()); f != nil {
+			m.failures = append(m.failures, *f)
+		}
+		return m, m.settle()
+
 	case finishMsg:
-		m.quitting = true
-		return m, tea.Quit
+		m.endPhase()
+		m.queue = append(m.queue, errorReport(m.failures)...)
+		m.finished = true
+		return m, m.flush()
 
-	case resultMsg:
-		// If msg contains an error, add it to the errorResults list.
-		if msg.Err() != nil {
-			m.errorResults = append(m.errorResults, msg)
-		}
+	case printedMsg:
+		m.printing = false
+		return m, m.flush()
 
-		// If any errors exist, prioritize retaining error messages while managing space.
-		if len(m.errorResults) > 0 {
-			m.trimNonErrorMessageAndAppend(msg)
-		} else {
-			// Otherwise, maintain a fixed-length message history.
-			m.replaceFirstNilOrAppend(msg)
-		}
-
-		switch v := msg.(type) {
-		case exifResultMsg, renameResultMsg:
-			if v.Err() != nil {
-				m.files[msg.Path()] = failed
-			} else {
-				m.files[msg.Path()] = succeeded
-			}
+	case tea.KeyPressMsg:
+		if msg.String() == "ctrl+c" {
+			return m, m.stop()
 		}
 		return m, nil
 
+	case interruptMsg:
+		return m, m.stop()
+
 	case spinner.TickMsg:
-		m.decideProgress()
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
-
-	default:
-		return m, nil
 	}
+	return m, nil
 }
 
-// counts returns how many files have succeeded and failed so far.
-func (m model) counts() (successes, failures int) {
-	for _, state := range m.files {
-		switch state {
-		case succeeded:
-			successes++
-		case failed:
-			failures++
-		}
+// stop shows the running rows as canceled and stops the work. The program
+// ends once the work reports finishMsg and everything is printed.
+func (m *model) stop() tea.Cmd {
+	if m.stopped {
+		return nil
 	}
-	return successes, failures
-}
-
-func (m model) percent() float64 {
-	successes, failures := m.counts()
-	return float64(successes+failures) / float64(m.total)
-}
-
-// decideProgress decides, once 3 seconds have passed, whether to show the
-// progress bar: it is shown when less than a quarter is done by then.
-func (m *model) decideProgress() {
-	if m.showProgressSet || time.Since(m.startTime) <= 3*time.Second {
-		return
+	m.stopped = true
+	m.phase.cancel(m.now())
+	if m.cancel != nil {
+		m.cancel()
 	}
-	m.showProgress = m.percent() < 0.25
-	m.showProgressSet = true
+	return m.settle()
 }
 
-func (m model) View() string {
-	var s strings.Builder
-
-	successes, failures := m.counts()
-
-	if m.quitting {
-		s.WriteString("Renaming done. Time: " +
-			duration(time.Since(m.startTime)).String())
-		fmt.Fprintf(&s, " (%d OK, %d failed, %d total)", successes, failures, m.total)
+// endPhase queues what the view showed of the phase, to keep it above.
+func (m *model) endPhase() {
+	p := m.phase
+	if p.compact {
+		m.queuePrinted()
+		m.queue = append(m.queue, p.compactEnd()...)
 	} else {
-		s.WriteString(m.spinner.View() + " Processing photos... ")
-		fmt.Fprintf(&s, "(%d/%d)", successes+failures, m.total)
+		m.queue = append(m.queue, p.fullView(true, "", m.now(), m.width)...)
 	}
+	m.queue = append(m.queue, "")
+}
 
-	s.WriteString("\n\n")
-
-	for _, res := range m.results {
-		switch res.(type) {
-		case exifResultMsg, renameResultMsg, cleanResultMsg:
-			s.WriteString(res.String())
-		default:
-			// default is resultMsg (interface)
-			s.WriteString(dotStyle.Render(strings.Repeat(".", 30)))
+// queuePrinted queues the finished rows of a compact phase not printed yet,
+// and the canceled ones once stopped.
+func (m *model) queuePrinted() {
+	p := m.phase
+	for _, it := range p.finished {
+		if !it.printed && shownAbove(it) {
+			it.printed = true
+			m.queue = append(m.queue, p.row(it, "", m.now(), m.width))
 		}
-		s.WriteString("\n")
 	}
-
-	s.WriteString("\n")
-
-	if percent := m.percent(); percent < 1 && (m.total > 100 || m.showProgress) {
-		s.WriteString(m.progress.ViewAs(percent))
-		s.WriteString("\n")
+	if p.canceled {
+		for _, it := range p.items {
+			if it.status == itemCanceled && !it.printed {
+				it.printed = true
+				m.queue = append(m.queue, p.row(it, "", m.now(), m.width))
+			}
+		}
 	}
+}
 
-	return appStyle.Render(s.String())
+// settle makes the phase compact when it no longer fits, queues what the
+// compact view does not hold, and prints it.
+func (m *model) settle() tea.Cmd {
+	p := m.phase
+	if !p.compact && p.wantCompact(m.height) {
+		p.compact = true
+		m.queue = append(m.queue, p.title(), "")
+	}
+	if p.compact {
+		m.queuePrinted()
+	}
+	return m.flush()
+}
+
+// flush prints the queued lines, or quits once the run has finished and
+// everything is printed.
+//
+// Commands returned by separate Updates run concurrently, so two batches of
+// tea.Println could come out of order, and tea.Quit could overtake a batch
+// and drop its lines. One batch is in flight at a time: a tea.Sequence that
+// ends with printedMsg, which sends the next batch, or the quit.
+func (m *model) flush() tea.Cmd {
+	if m.printing {
+		return nil
+	}
+	if len(m.queue) > 0 {
+		// One Println for the batch: an empty line printed on its own is
+		// dropped, but kept inside a text.
+		text := strings.Join(m.queue, "\n")
+		m.queue = nil
+		m.printing = true
+		return tea.Sequence(tea.Println(text), func() tea.Msg { return printedMsg{} })
+	}
+	if m.finished {
+		return tea.Quit
+	}
+	return nil
+}
+
+func (m model) View() tea.View {
+	if m.finished {
+		return tea.NewView("")
+	}
+	p, spin, now := m.phase, m.spinner.View(), m.now()
+	var lines []string
+	if p.compact {
+		lines = p.compactView(spin, now, m.width, m.height)
+	} else {
+		lines = p.fullView(false, spin, now, m.width)
+	}
+	return tea.NewView(strings.Join(lines, "\n"))
 }

@@ -1,2 +1,7 @@
 naminator
 /coverage.out
+
+# VHS demo (build artifacts in docs/tapes/, GIFs copied to docs/)
+docs/tapes/.naminator
+docs/tapes/*.gif
+docs/tapes/*.mp4

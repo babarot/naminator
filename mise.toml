@@ -32,6 +32,10 @@ golangci-lint run ./...
 go mod tidy -diff
 '''
 
+[tasks.demo]
+description = "Record the demo GIFs with VHS in Docker and copy them to docs/: mise run demo [-e KEY=VAL ...] [TAPE ...]"
+file = "scripts/demo.sh"
+
 [tasks.vuln]
 description = "Check the dependencies and the standard library for known vulnerabilities"
 run = "go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./..."

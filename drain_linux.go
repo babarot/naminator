@@ -1,0 +1,60 @@
+//go:build linux || solaris || aix
+
+package main
+
+import (
+	"os"
+
+	"golang.org/x/sys/unix"
+)
+
+// drainStdinAfterBubbletea flushes pending terminal input that leaks as
+// garbage characters (e.g. ^[[?2026;2$y, ^[[?2027;2$y, ^[[?1u) after a
+// bubbletea v2 program exits.
+//
+// Bug details:
+// bubbletea v2's cursed_renderer sends terminal capability queries on startup:
+//   - DECRQM for Synchronized Output (mode 2026)
+//   - DECRQM for Unicode Core (mode 2027)
+//   - Kitty Keyboard Protocol query (?1u response)
+//
+// These queries are written to the output (stderr/stdout), and the terminal
+// asynchronously responds via stdin. However, during shutdown bubbletea calls
+// cancelReader.Cancel() to stop the input read loop *before* stopRenderer()
+// flushes the final mode-reset sequences. This means the terminal's query
+// responses arrive after the read loop has exited and nobody consumes them,
+// so they leak into the user's shell prompt.
+//
+// This drain approach is borrowed from a community fork:
+//
+//	https://github.com/saltydk/bubbletea/commit/96c1e05
+//
+// On Linux, uses a poll loop with 200ms timeout to accommodate SSH round-trip
+// latency where terminal responses may arrive in bursts.
+//
+// Related upstream issues (open as of bubbletea v2.0.2, no official fix yet):
+//   - https://github.com/charmbracelet/bubbletea/issues/1590
+//   - https://github.com/charmbracelet/bubbletea/issues/1627
+//
+// TODO: Remove this workaround once bubbletea ships an official fix.
+func drainStdinAfterBubbletea() {
+	f := os.Stdin
+	if f == nil {
+		return
+	}
+	fd := int(f.Fd())
+	fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+
+	// Stop when stdin is not a terminal (the flush fails) or is closed:
+	// poll reports such a descriptor as ready every time, so the loop
+	// would never end.
+	for {
+		if err := unix.IoctlSetInt(fd, unix.TCFLSH, 0); err != nil { // flush read queue
+			return
+		}
+		n, _ := unix.Poll(fds, 200)
+		if n <= 0 || fds[0].Revents&(unix.POLLHUP|unix.POLLERR|unix.POLLNVAL) != 0 {
+			return
+		}
+	}
+}
