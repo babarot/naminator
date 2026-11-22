@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """A stand-in for exiftool in the demo: it speaks the -stay_open protocol
 that go-exiftool uses, and answers each file with the shooting time listed
-for its name in $MOCK_DATES ("name|YYYY:MM:DD HH:MM:SS" per line), after a
+for its name in $MOCK_DATES ("name|YYYY:MM:DD HH:MM:SS|model" per line, the
+camera model optional), after a
 delay that varies by file, as reading a real photo does. A file not listed
 has no shooting time, as a screenshot."""
 import hashlib
@@ -13,8 +14,8 @@ import time
 dates = {}
 with open(os.environ["MOCK_DATES"]) as f:
     for line in f:
-        name, _, date = line.rstrip("\n").partition("|")
-        dates[name] = date
+        name, date, *model = line.rstrip("\n").split("|")
+        dates[name] = (date, model[0] if model else "")
 delay = float(os.environ.get("MOCK_DELAY", "0.3"))
 
 args = []
@@ -34,8 +35,11 @@ for line in sys.stdin:
         time.sleep(delay * (0.5 + (h % 100) / 100))
         info = {"SourceFile": path, "FileName": name}
         if name in dates:
-            info["DateTimeOriginal"] = dates[name]
+            date, model = dates[name]
+            info["DateTimeOriginal"] = date
             info["FileTypeExtension"] = os.path.splitext(name)[1][1:].lower()
+            if model:
+                info["Model"] = model
         out.append(info)
     sys.stdout.write(json.dumps(out) + "\n{ready}\n")
     sys.stdout.flush()

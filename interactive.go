@@ -6,6 +6,7 @@ import (
 	"os"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // checkInteractive reports flags that cannot be used with -i.
@@ -58,6 +59,8 @@ func (c CLI) runInteractive(tui tuiModel) error {
 	decided := make(chan tuiDecision, 1)
 	tui.decided = decided
 	tui.runBase, tui.runInto = c.base, c.into
+	// the color of the cursor's line suits the terminal's background
+	tui.dark = lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
 	p := tea.NewProgram(tui, tea.WithoutSignalHandler())
 	c.p, c.sender = p, p
 	final, err := c.runProgram(p, func() {

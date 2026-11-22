@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -104,6 +105,10 @@ type tuiModel struct {
 	// clean is --clean, and removed the directories it would remove
 	clean   bool
 	removed []string
+
+	// dark tells the terminal's background, for the color of the cursor's
+	// line
+	dark bool
 
 	insert  bool
 	confirm bool
@@ -210,6 +215,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The lines can be fewer after a photo is read or the format
 		// changes: keep the cursor on one of them
 		tm.sel = max(0, min(tm.sel, len(tm.items())-1))
+		// keep the lines shown, moving them only to keep the cursor in
+		n := tm.listHeight()
+		tm.top = min(max(0, min(tm.top, len(tm.items())-n)), tm.sel)
+		if tm.sel >= tm.top+n {
+			tm.top = tm.sel - n + 1
+		}
 		return tm, cmd
 	}
 	return next, cmd
@@ -455,7 +466,7 @@ func (m tuiModel) items() []tuiItem {
 	for _, r := range m.rows {
 		fromW = max(fromW, ansi.StringWidth(r.key))
 	}
-	fromW = min(fromW, 40)
+	fromW = min(fromW, 36)
 	items := make([]tuiItem, len(m.rows))
 	for i, r := range m.rows {
 		items[i] = tuiItem{kind: itemRow, row: r, draw: func(sel bool) string { return m.row(r, sel, fromW) }}
@@ -500,6 +511,18 @@ func (m tuiModel) presetName() string {
 		}
 	}
 	return "custom"
+}
+
+// presetLabel is presetName with the flags the preset stands for, as
+// "by date (-t)".
+func (m tuiModel) presetLabel() string {
+	name := m.presetName()
+	for _, p := range presets {
+		if p.name == name && p.flags != "" && p.format == m.format {
+			return name + " (" + p.flags + ")"
+		}
+	}
+	return name
 }
 
 // save writes the format to the configuration file as its format.
@@ -547,6 +570,34 @@ func saveFormat(path, format string) error {
 
 // ================= view =================
 
+// listHeight is how many lines the list or the tree gets: the screen less
+// the header, the format's box, the parts, the counts, a line and the keys.
+func (m tuiModel) listHeight() int {
+	return max(3, m.viewHeight()-8)
+}
+
+// resetSGR matches the resets of the styles, after which the background of
+// the cursor's line is set again.
+var resetSGR = regexp.MustCompile(`\x1b\[0?m`)
+
+// highlight draws line, padded to width, on the background of the cursor's
+// line: lighter than the terminal's, and lighter still in insert mode,
+// where the keys go to the format.
+func (m tuiModel) highlight(line string, width int) string {
+	color := "40;52;87" // #283457
+	switch {
+	case m.dark && m.insert:
+		color = "34;36;54" // #222436
+	case !m.dark && m.insert:
+		color = "238;241;251" // #eef1fb
+	case !m.dark:
+		color = "219;228;255" // #dbe4ff
+	}
+	bg := "\x1b[48;2;" + color + "m"
+	line = resetSGR.ReplaceAllStringFunc(line, func(r string) string { return r + bg })
+	return bg + padRight(line, width) + "\x1b[49m"
+}
+
 // viewHeight is how many lines the screen takes: the terminal less a line
 // for the cursor, within limits.
 func (m tuiModel) viewHeight() int {
@@ -589,7 +640,13 @@ func (m tuiModel) lines(now time.Time) []string {
 	if m.insert {
 		hint = "editing  "
 	}
-	body := spread(" "+Blue.Render(m.base())+m.formatView(), Dim.Render(hint+m.presetName()+"  tab ›")+" ", inner)
+	boxRight := Dim.Render(hint+m.presetLabel()+"  tab ›") + " "
+	boxLeft := " " + Blue.Render(m.base()) + m.formatView()
+	// a long format is cut rather than the hint on the right
+	if room := inner - ansi.StringWidth(boxRight) - 1; ansi.StringWidth(boxLeft) > room {
+		boxLeft = ansi.Truncate(boxLeft, max(room, 1), iconEllipsis)
+	}
+	body := spread(boxLeft, boxRight, inner)
 	lines = append(lines, border.Render("│")+padRight(body, inner)+border.Render("│"))
 	lines = append(lines, border.Render("╰"+strings.Repeat("─", max(0, inner))+"╯"))
 
@@ -600,20 +657,23 @@ func (m tuiModel) lines(now time.Time) []string {
 		lines = append(lines, fitLine(m.partsLine(), w))
 	}
 
-	// the list or the tree
+	// the list or the tree, the cursor's line on a lighter background
 	items := m.items()
-	n := max(3, m.viewHeight()-len(lines)-3)
-	top := min(m.top, max(0, len(items)-n), m.sel)
+	n := m.listHeight()
+	top := min(max(0, min(m.top, len(items)-n)), m.sel)
 	if m.sel >= top+n {
 		top = m.sel - n + 1
 	}
 	for i := range n {
 		j := top + i
-		if j >= len(items) {
+		switch {
+		case j >= len(items):
 			lines = append(lines, "")
-			continue
+		case j == m.sel && styled:
+			lines = append(lines, m.highlight(fitLine(items[j].draw(false), w), w))
+		default:
+			lines = append(lines, fitLine(items[j].draw(j == m.sel), w))
 		}
-		lines = append(lines, fitLine(items[j].draw(j == m.sel), w))
 	}
 
 	// what the photos would get, then the keys
@@ -822,7 +882,10 @@ func (m tuiModel) help() string {
 	if m.insert {
 		return strings.Join([]string{key("esc/enter", "done"), key("tab", "preset"), key("←/→", "cursor"), key("↑/↓", "move"), key("ctrl+t", "tree"), key("ctrl+s", "save")}, Dim.Render(" • "))
 	}
-	enter := key("enter", "rename")
+	enter := key("enter", "rename…")
+	if m.dry {
+		enter = key("enter", "dry run…")
+	}
 	if ok, why := m.ready(); !ok {
 		enter = Dim.Render("enter rename (" + why + ")")
 	}
