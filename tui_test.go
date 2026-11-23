@@ -911,21 +911,59 @@ func TestTUITreeArrows(t *testing.T) {
 // lines shown by a page.
 func TestTUIPage(t *testing.T) {
 	m := newMouseTUI(t, 60, 0)
-	n := m.listHeight()
-	m = m.send(t, keys("ctrl+d")...)
-	if m.sel != n || m.top != n {
-		t.Errorf("ctrl+d: sel = %d, top = %d, want %d", m.sel, m.top, n)
+	// each ctrl+d puts the cursor on the first line not shown before, and
+	// shows the lines from it
+	for range 2 {
+		before := m.window()
+		m = m.send(t, keys("ctrl+d")...)
+		if want := before.top + before.rows; m.sel != want || m.window().top != want {
+			t.Fatalf("ctrl+d: sel = %d, top = %d, want %d", m.sel, m.window().top, want)
+		}
 	}
-	m = m.send(t, keys("ctrl+d", "ctrl+d", "ctrl+d", "ctrl+d")...)
-	if m.sel != 59 || m.top != 60-n {
-		t.Errorf("ctrl+d at the end: sel = %d, top = %d", m.sel, m.top)
+	m = m.send(t, keys("ctrl+d", "ctrl+d", "ctrl+d")...)
+	if w := m.window(); m.sel != 59 || w.top+w.rows != 60 || w.down {
+		t.Errorf("ctrl+d at the end: sel = %d, window = %+v", m.sel, w)
 	}
 	m = m.send(t, keys("ctrl+u")...)
-	if m.sel != 59-n || m.top != 60-2*n {
-		t.Errorf("ctrl+u: sel = %d, top = %d, want %d, %d", m.sel, m.top, 59-n, 60-2*n)
+	if w := m.window(); m.sel >= 59 || m.sel < w.top || m.sel >= w.top+w.rows {
+		t.Errorf("ctrl+u: sel = %d, window = %+v", m.sel, w)
 	}
-	m = m.send(t, tea.KeyPressMsg{Code: tea.KeyPgUp}, tea.KeyPressMsg{Code: tea.KeyPgUp}, tea.KeyPressMsg{Code: tea.KeyPgUp})
-	if m.sel != 0 || m.top != 0 {
-		t.Errorf("pgup at the top: sel = %d, top = %d", m.sel, m.top)
+	m = m.send(t, tea.KeyPressMsg{Code: tea.KeyPgUp}, tea.KeyPressMsg{Code: tea.KeyPgUp}, tea.KeyPressMsg{Code: tea.KeyPgUp}, tea.KeyPressMsg{Code: tea.KeyPgUp})
+	if w := m.window(); m.sel != 0 || w.top != 0 || w.up {
+		t.Errorf("pgup at the top: sel = %d, window = %+v", m.sel, w)
+	}
+}
+
+// When the list does not fit, a line says how many more lines there are
+// below, and above once it has moved; the cursor always stays on a line
+// shown, and the list never takes more lines than it has.
+func TestTUIMoreLines(t *testing.T) {
+	m := newMouseTUI(t, 60, 0)
+	n := m.listHeight()
+	text := func() string { return ansi.Strip(strings.Join(m.lines(time.Now()), "\n")) }
+	if !strings.Contains(text(), fmt.Sprintf("↓ %d more", 60-(n-1))) || strings.Contains(text(), "↑") {
+		t.Fatalf("at the top:\n%s", text())
+	}
+	for i := range 60 {
+		w := m.window()
+		if m.sel < w.top || m.sel >= w.top+w.rows || w.rows+btoi(w.up)+btoi(w.down) != n {
+			t.Fatalf("sel %d: window %+v, n = %d", i, w, n)
+		}
+		m = m.send(t, keys("j")...)
+	}
+	if !strings.Contains(text(), "↑ ") || strings.Contains(text(), "↓") {
+		t.Errorf("at the end:\n%s", text())
+	}
+	// a click on the line below pages down
+	m = m.send(t, keys("g")...)
+	x, y := find(t, m, "↓ ")
+	m = m.send(t, click(m, x, y))
+	if m.sel != n-1 {
+		t.Errorf("a click on ↓ should page down, sel = %d", m.sel)
+	}
+	// everything fits: no lines for more
+	few := newMouseTUI(t, 3, 0)
+	if s := ansi.Strip(strings.Join(few.lines(time.Now()), "\n")); strings.Contains(s, "more  (ctrl") {
+		t.Errorf("3 photos:\n%s", s)
 	}
 }

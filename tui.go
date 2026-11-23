@@ -257,11 +257,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// changes: keep the cursor on one of them
 		tm.sel = max(0, min(tm.sel, len(tm.items())-1))
 		// keep the lines shown, moving them only to keep the cursor in
-		n := tm.listHeight()
-		tm.top = min(max(0, min(tm.top, len(tm.items())-n)), tm.sel)
-		if tm.sel >= tm.top+n {
-			tm.top = tm.sel - n + 1
-		}
+		tm.top = tm.window().top
 		if tm.settled {
 			tm.peak = max(tm.peak, tm.viewHeight())
 		}
@@ -795,25 +791,23 @@ func (m tuiModel) lines(now time.Time) []string {
 
 	// the list or the tree, the cursor's line on a lighter background
 	items := m.items()
-	n := m.listHeight()
-	top := min(max(0, min(m.top, len(items)-n)), m.sel)
-	if m.sel >= top+n {
-		top = m.sel - n + 1
+	win := m.window()
+	if win.up {
+		lines = append(lines, fitLine("     "+Dim.Render(fmt.Sprintf("↑ %d more  (ctrl+u)", win.top)), w))
 	}
-	for i := range n {
-		j := top + i
-		switch {
-		case j >= len(items):
-			lines = append(lines, "")
-		case j == m.sel && styled:
+	for j := win.top; j < win.top+win.rows; j++ {
+		if j == m.sel && styled {
 			lines = append(lines, m.highlight(fitLine(items[j].draw(false), w), w))
-		default:
+		} else {
 			lines = append(lines, fitLine(items[j].draw(j == m.sel), w))
 		}
 	}
+	if win.down {
+		lines = append(lines, fitLine("     "+Dim.Render(fmt.Sprintf("↓ %d more  (ctrl+d)", len(items)-win.top-win.rows)), w))
+	}
 
 	// what the photos would get, then the keys
-	lines = append(lines, spread(m.countLine(), Dim.Render(fmt.Sprintf("%d/%d ", min(top+n, len(items)), len(items))), w))
+	lines = append(lines, fitLine(m.countLine(), w))
 	if !m.tight() {
 		lines = append(lines, fitLine("  "+m.notice, w))
 	}
@@ -1088,9 +1082,59 @@ func spread(left, right string, width int) string {
 // page moves the cursor and the lines shown by a page of the list, up
 // (-1) or down (1), as a pager does.
 func (m *tuiModel) page(dir int) {
-	n := m.listHeight() * dir
+	n := max(1, m.window().rows) * dir
 	m.sel = max(0, min(len(m.items())-1, m.sel+n))
 	m.top = max(0, m.top+n)
+}
+
+// listWindow is what the list shows: rows lines from top, and a line
+// saying how many more there are above (up) and below (down).
+type listWindow struct {
+	top, rows int
+	up, down  bool
+}
+
+// window lays out the list's lines: the lines from m.top, moved only to
+// keep the cursor in, and, when they do not all fit, a line for those
+// above and one for those below in place of a line of the list. A list
+// of fewer than three lines has no room for them.
+func (m tuiModel) window() listWindow {
+	n, total := m.listHeight(), len(m.items())
+	sel := max(0, min(m.sel, total-1))
+	if total <= n || n < 3 {
+		top := min(max(0, min(m.top, total-n)), sel)
+		if sel >= top+n {
+			top = sel - n + 1
+		}
+		return listWindow{top: max(0, top), rows: min(n, total)}
+	}
+	// the lines from top, with a line for those above when top is not the
+	// first and one for those below when the last is not shown; moving top
+	// for the cursor can add the line above, so lay it out again
+	top := max(0, min(m.top, total-(n-1)))
+	var w listWindow
+	for range 4 {
+		w = listWindow{top: top, rows: n, up: top > 0}
+		w.rows -= btoi(w.up)
+		w.down = top+w.rows < total
+		w.rows -= btoi(w.down)
+		switch {
+		case sel < top:
+			top = sel
+		case sel >= top+w.rows:
+			top = sel - w.rows + 1
+		default:
+			return w
+		}
+	}
+	return w
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // shown writes a path of a row from the parent of the argument the photo
