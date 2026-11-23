@@ -711,3 +711,151 @@ func TestTUILowTerminal(t *testing.T) {
 		}
 	}
 }
+
+// click clicks at column x of line y of the screen, drawn from the row
+// the prompt is on.
+func click(m tuiModel, x, y int) tea.Msg {
+	return tea.MouseClickMsg{X: x, Y: m.frameTop() + y, Button: tea.MouseLeft}
+}
+
+// find returns the line and column where s is drawn on the screen.
+func find(t *testing.T, m tuiModel, s string) (x, y int) {
+	t.Helper()
+	for i, l := range m.lines(time.Now()) {
+		plain := ansi.Strip(l)
+		if before, _, ok := strings.Cut(plain, s); ok {
+			return ansi.StringWidth(before), i
+		}
+	}
+	t.Fatalf("%q is not on the screen", s)
+	return 0, 0
+}
+
+func newMouseTUI(t *testing.T, n, cursorY int) tuiModel {
+	t.Helper()
+	m, photos := newTestTUI(t, n)
+	m = m.send(t, readAll(photos)...)
+	return m.send(t, tea.CursorPositionMsg{Y: cursorY})
+}
+
+func TestTUIMouseWheel(t *testing.T) {
+	m := newMouseTUI(t, 10, 3)
+	if m.View().MouseMode != tea.MouseModeCellMotion {
+		t.Fatal("the screen should take the mouse")
+	}
+	m = m.send(t, tea.MouseWheelMsg{Button: tea.MouseWheelDown}, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	if m.sel != 2 {
+		t.Errorf("sel = %d after two turns down, want 2", m.sel)
+	}
+	m = m.send(t, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if m.sel != 1 {
+		t.Errorf("sel = %d after a turn up, want 1", m.sel)
+	}
+	// beyond the lines shown, the list follows the cursor
+	for range 30 {
+		m = m.send(t, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	}
+	if m.sel != 9 || m.top == 0 && m.listHeight() < 10 {
+		t.Errorf("sel = %d, top = %d", m.sel, m.top)
+	}
+}
+
+func TestTUIMouseClickList(t *testing.T) {
+	m := newMouseTUI(t, 10, 3)
+	x, y := find(t, m, "DSC00004.JPG")
+	m = m.send(t, click(m, x, y))
+	if r := m.items()[m.sel].row; r == nil || r.photo.Name != "DSC00004.JPG" {
+		t.Errorf("the click should put the cursor on DSC00004.JPG, sel = %d", m.sel)
+	}
+	// in the tree, a second click on a directory folds it
+	m = m.send(t, keys("t")...)
+	fx, fy := find(t, m, "DSC00001.JPG")
+	m = m.send(t, click(m, fx, fy))
+	x, y = find(t, m, "card/")
+	m = m.send(t, click(m, x, y))
+	if m.sel != 0 {
+		t.Fatalf("the first click on the top should select it, sel = %d", m.sel)
+	}
+	n := len(m.items())
+	m = m.send(t, click(m, x, y))
+	if len(m.items()) >= n {
+		t.Errorf("a second click on a directory should fold it: %d lines, then %d", n, len(m.items()))
+	}
+	m = m.send(t, click(m, x, y))
+	if len(m.items()) != n {
+		t.Errorf("a third click should open it: %d lines, want %d", len(m.items()), n)
+	}
+}
+
+func TestTUIMouseClickHeaderAndFormat(t *testing.T) {
+	m := newMouseTUI(t, 4, 3)
+	x, y := find(t, m, "view: list")
+	m = m.send(t, click(m, x+7, y))
+	if m.view != viewTree {
+		t.Fatalf("a click on the view's name should switch to the tree, view = %v", m.view)
+	}
+	x, y = find(t, m, "view: tree")
+	m = m.send(t, click(m, x, y))
+	if m.view != viewList {
+		t.Fatalf("a second click should switch back, view = %v", m.view)
+	}
+
+	before := m.format
+	x, y = find(t, m, "tab ›")
+	m = m.send(t, click(m, x, y))
+	if m.format == before {
+		t.Error("a click on tab › should go to the next preset")
+	}
+	x, y = find(t, m, m.presetLabel())
+	m = m.send(t, click(m, x, y))
+	if m.format == before || m.insert {
+		t.Errorf("a click on the preset should go to the next one, format = %q", m.format)
+	}
+
+	m.setFormat("{date}_{time}")
+	x, y = find(t, m, "{date}_{time}")
+	m = m.send(t, click(m, x+7, y))
+	if !m.insert || m.cursor != 7 {
+		t.Errorf("a click in the format should edit it there: insert = %v, cursor = %d", m.insert, m.cursor)
+	}
+	// clicking the list ends editing
+	x, y = find(t, m, "DSC00001.JPG")
+	m = m.send(t, click(m, x, y))
+	if m.insert {
+		t.Error("a click on the list should end editing")
+	}
+}
+
+// The mouse does nothing while the screen asks y/N, and before the
+// terminal told where the screen is.
+func TestTUIMouseOff(t *testing.T) {
+	m, photos := newTestTUI(t, 4)
+	m = m.send(t, readAll(photos)...)
+	m = m.send(t, cursorWaitedMsg{})
+	if m.View().MouseMode != tea.MouseModeNone {
+		t.Error("without the cursor position the screen should not take the mouse")
+	}
+	m = newMouseTUI(t, 4, 3)
+	m = m.send(t, keys("enter")...)
+	if !m.confirm || m.View().MouseMode != tea.MouseModeNone {
+		t.Fatalf("confirm = %v, mouse = %v", m.confirm, m.View().MouseMode)
+	}
+	m = m.send(t, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	if m.sel != 0 || !m.confirm {
+		t.Errorf("the wheel should do nothing while asking, sel = %d", m.sel)
+	}
+}
+
+// The screen's top row: from the prompt, or higher when the terminal
+// scrolled for it, and it stays there when the screen gets fewer lines.
+func TestTUIFrameTop(t *testing.T) {
+	m := newMouseTUI(t, 10, 25) // 18 lines from row 25 of 30
+	if got, want := m.frameTop(), 30-m.viewHeight(); got != want {
+		t.Errorf("frameTop = %d, want %d", got, want)
+	}
+	top := m.frameTop()
+	m = m.send(t, keys("t", "g", "h")...) // the tree, folded to its top
+	if m.frameTop() != top {
+		t.Errorf("frameTop = %d after the screen shrank, want %d", m.frameTop(), top)
+	}
+}
