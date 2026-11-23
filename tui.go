@@ -498,7 +498,7 @@ func (m tuiModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.fold(false)
 	case "l", "right":
 		m.fold(true)
-	case "t":
+	case "v":
 		m.toggleView()
 	case "m":
 		m.toggleFileTime()
@@ -1055,9 +1055,9 @@ func (m tuiModel) help() string {
 	}
 	keys := []string{key("i", "edit format"), key("tab", "preset"), key("j/k", "move")}
 	if m.view == viewTree {
-		keys = append(keys, key("h/l", "fold"), key("t", "list"))
+		keys = append(keys, key("h/l", "fold"), key("v", "list"))
 	} else {
-		keys = append(keys, key("t", "tree"))
+		keys = append(keys, key("v", "tree"))
 	}
 	if r := m.selected(); r != nil && r.read && r.err != "" {
 		keys = append(keys, key("m", "file time"))

@@ -361,7 +361,7 @@ func treeText(m tuiModel) []string {
 
 func TestTUITree(t *testing.T) {
 	m := newCardsTUI(t)
-	m = m.send(t, keys("t")...)
+	m = m.send(t, keys("v")...)
 	if m.view != viewTree {
 		t.Fatal("t should show the tree")
 	}
@@ -392,7 +392,7 @@ func TestTUITree(t *testing.T) {
 // format changes: the top is never folded, and l on it opens everything.
 // The cursor stays on a line when the tree gets shorter.
 func TestTUITreeAfterFormatChange(t *testing.T) {
-	m := newCardsTUI(t).send(t, keys("t")...)
+	m := newCardsTUI(t).send(t, keys("v")...)
 	// fold every directory, then pick a format with fewer of them
 	m = m.send(t, keys("g", "h", "G")...)
 	for _, it := range m.items() {
@@ -421,7 +421,7 @@ func TestTUITreeAfterFormatChange(t *testing.T) {
 func TestTUITreeFoldTop(t *testing.T) {
 	m, photos := newTestTUI(t, 10)
 	m = m.send(t, readAll(photos)...)
-	m = m.send(t, keys("t")...)
+	m = m.send(t, keys("v")...)
 	if n := len(m.items()); n < 3 {
 		t.Fatalf("tree has %d lines", n)
 	}
@@ -445,7 +445,7 @@ func TestTUITreeFoldTop(t *testing.T) {
 }
 
 func TestTUITreeFold(t *testing.T) {
-	m := newCardsTUI(t).send(t, keys("t")...)
+	m := newCardsTUI(t).send(t, keys("v")...)
 	find := func(m tuiModel, text string) int {
 		for i, line := range treeText(m) {
 			if strings.Contains(line, text) {
@@ -482,7 +482,7 @@ func TestTUITreeFold(t *testing.T) {
 		t.Errorf("after folding all: %d lines:\n%s", n, strings.Join(treeText(m), "\n"))
 	}
 	// h and l do nothing in the list
-	m = m.send(t, keys("t", "j", "h")...)
+	m = m.send(t, keys("v", "j", "h")...)
 	if m.view != viewList || m.sel != 1 {
 		t.Errorf("view = %v, sel = %d", m.view, m.sel)
 	}
@@ -768,7 +768,7 @@ func TestTUIMouseClickList(t *testing.T) {
 		t.Errorf("the click should put the cursor on DSC00004.JPG, sel = %d", m.sel)
 	}
 	// in the tree, a second click on a directory folds it
-	m = m.send(t, keys("t")...)
+	m = m.send(t, keys("v")...)
 	fx, fy := find(t, m, "DSC00001.JPG")
 	m = m.send(t, click(m, fx, fy))
 	x, y = find(t, m, "card/")
@@ -854,7 +854,7 @@ func TestTUIFrameTop(t *testing.T) {
 		t.Errorf("frameTop = %d, want %d", got, want)
 	}
 	top := m.frameTop()
-	m = m.send(t, keys("t", "g", "h")...) // the tree, folded to its top
+	m = m.send(t, keys("v", "g", "h")...) // the tree, folded to its top
 	if m.frameTop() != top {
 		t.Errorf("frameTop = %d after the screen shrank, want %d", m.frameTop(), top)
 	}
@@ -888,7 +888,7 @@ func TestTUITreeArrows(t *testing.T) {
 	m, photos := newTestTUI(t, 4)
 	m = m.send(t, readAll(photos)...)
 	m.setFormat("{dir}/{date}/{date}_{time}")
-	m = m.send(t, keys("t")...)
+	m = m.send(t, keys("v")...)
 	col := -1
 	for _, l := range treeText(m) {
 		before, _, ok := strings.Cut(l, "←")
