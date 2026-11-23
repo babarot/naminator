@@ -31,26 +31,6 @@ Using `go`
 go install github.com/babarot/naminator@latest
 ```
 
-Using [`afx`](https://github.com/babarot/afx)
-
-```yaml
-github:
-- name: babarot/naminator
-  description: Bulk-rename w/ EXIF metadata
-  owner: babarot
-  repo: naminator
-  release:
-    name: naminator
-    tag: v0.2.7
-  command:
-    link:
-    - from: naminator
-```
-
-```console
-afx install
-```
-
 ## Usage
 
 Pass the directories (or the files) of your photos:
