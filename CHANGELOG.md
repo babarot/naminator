@@ -1,5 +1,22 @@
 # Changelog
 
+## [v0.3.0](https://github.com/babarot/naminator/compare/v0.2.7...v0.3.0) - 2026-11-23
+
+### New Features
+- Name photos with templates by @babarot in https://github.com/babarot/naminator/pull/50
+- Rename sidecar files with their photos by @babarot in https://github.com/babarot/naminator/pull/52
+- Add --format, --preset and a configuration file by @babarot in https://github.com/babarot/naminator/pull/53
+- Add an interactive screen to preview and choose the format by @babarot in https://github.com/babarot/naminator/pull/54
+- Show the photos as a tree in the interactive screen by @babarot in https://github.com/babarot/naminator/pull/55
+- Rename photos without a shooting time by the file's time by @babarot in https://github.com/babarot/naminator/pull/57
+- Open the interactive screen by default in a terminal by @babarot in https://github.com/babarot/naminator/pull/58
+- Take the mouse on the interactive screen by @babarot in https://github.com/babarot/naminator/pull/60
+- Polish the interactive screen from trying it by @babarot in https://github.com/babarot/naminator/pull/61
+### Improvements
+- Match the interactive screen to its design by @babarot in https://github.com/babarot/naminator/pull/56
+- Size the interactive screen to what it shows by @babarot in https://github.com/babarot/naminator/pull/59
+- Rewrite the README around the interactive screen by @babarot in https://github.com/babarot/naminator/pull/62
+
 ## [v0.2.7](https://github.com/babarot/naminator/compare/v0.2.6...v0.2.7) - 2026-11-22
 
 ### Bug fixes
