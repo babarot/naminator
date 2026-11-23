@@ -559,7 +559,7 @@ func (m tuiModel) items() []tuiItem {
 	}
 	fromW := 0
 	for _, r := range m.rows {
-		fromW = max(fromW, ansi.StringWidth(r.key))
+		fromW = max(fromW, ansi.StringWidth(m.shown(r, r.key)))
 	}
 	fromW = min(fromW, 36)
 	items := make([]tuiItem, len(m.rows))
@@ -936,7 +936,7 @@ func (m tuiModel) row(r *tuiRow, selected bool, fromW int) string {
 	if selected {
 		lead = Cyan.Render(">") + " "
 	}
-	from := padName(r.key, fromW)
+	from := padName(m.shown(r, r.key), fromW)
 	switch {
 	case !r.read:
 		return lead + Dim.Render(iconQueued) + " " + Dim.Render(from) + "  " + Dim.Render("reading EXIF…")
@@ -947,7 +947,7 @@ func (m tuiModel) row(r *tuiRow, selected bool, fromW int) string {
 	case r.same:
 		return lead + Green.Render(iconSuccess) + " " + Dim.Render(from) + "  " + Dim.Render("already named")
 	}
-	to := r.target
+	to := m.shown(r, r.target)
 	if r.suffix != "" {
 		base := strings.TrimSuffix(to, filepath.Ext(to))
 		to = strings.TrimSuffix(base, r.suffix) + Yellow.Render(r.suffix) + filepath.Ext(to)
@@ -1079,6 +1079,18 @@ func spread(left, right string, width int) string {
 		return fitLine(left, width)
 	}
 	return left + strings.Repeat(" ", gap) + right
+}
+
+// shown writes a path of a row from the parent of the argument the photo
+// was found under, as the arguments are usually given ("card/DSC00001.JPG"
+// for ~/Desktop/card), however they were given. A path outside it, such
+// as under -d, is written from the home directory.
+func (m tuiModel) shown(r *tuiRow, path string) string {
+	base := absPath(argParent(m.args, r.key))
+	if rel, err := filepath.Rel(base, absPath(path)); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return rel
+	}
+	return abbrevHome(absPath(path), os.Getenv("HOME"))
 }
 
 // padRight pads s with spaces to width cells, or cuts it.

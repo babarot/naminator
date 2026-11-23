@@ -281,7 +281,7 @@ func (m tuiModel) fileText(f treeFile) string {
 	case r.same || m.tplErr != "":
 		return Dim.Render(f.name + "  (already named)")
 	}
-	s := f.name + Dim.Render("  ← "+r.key)
+	s := f.name + Dim.Render("  ← "+m.shown(r, r.key))
 	if r.suffix != "" {
 		s += "  " + Yellow.Render(r.suffix)
 	}

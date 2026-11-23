@@ -859,3 +859,25 @@ func TestTUIFrameTop(t *testing.T) {
 		t.Errorf("frameTop = %d after the screen shrank, want %d", m.frameTop(), top)
 	}
 }
+
+// The paths of the rows are written from the parent of the argument, as
+// the arguments are usually given, also when given as absolute paths.
+func TestTUIShownPath(t *testing.T) {
+	t.Setenv("HOME", "/home/u")
+	m := tuiModel{args: []string{"/home/u/Desktop/panda/"}}
+	r := &tuiRow{key: "/home/u/Desktop/panda/A7C02795.ARW"}
+	for path, want := range map[string]string{
+		r.key:                              "panda/A7C02795.ARW",
+		"/home/u/Desktop/panda/2025/a.arw": "panda/2025/a.arw",
+		"/home/u/Desktop/2025-08-22/a.arw": "2025-08-22/a.arw",
+		"/home/u/Pictures/out/a.arw":       "~/Pictures/out/a.arw",
+	} {
+		if got := m.shown(r, path); got != want {
+			t.Errorf("shown(%q) = %q, want %q", path, got, want)
+		}
+	}
+	rel := tuiModel{args: []string{"card"}}
+	if got := rel.shown(&tuiRow{key: "card/DSC00001.JPG"}, "card/DSC00001.JPG"); got != "card/DSC00001.JPG" {
+		t.Errorf("relative: %q", got)
+	}
+}
