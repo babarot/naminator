@@ -759,8 +759,11 @@ func getExifdata(et *exiftool.Exiftool, path string) (Photo, error) {
 	}
 	// ExtractMetadata can deal with multiple files at once but this function only uses one argument
 	// so it's enough to reference the first element in fileInfos.
-	fileInfo := fileInfos[0]
+	return photoOf(photo, fileInfos[0])
+}
 
+// photoOf fills photo from what exiftool read of it.
+func photoOf(photo Photo, fileInfo exiftool.FileMetadata) (Photo, error) {
 	if fileInfo.Err != nil {
 		return photo, fmt.Errorf("file info error: %w", fileInfo.Err)
 	}
@@ -777,7 +780,11 @@ func getExifdata(et *exiftool.Exiftool, path string) (Photo, error) {
 	if err != nil {
 		var fallbackErr error
 		createdAt, fallbackErr = getExifTime(fileInfo, "DateTimeOriginal")
-		if fallbackErr != nil {
+		switch {
+		case errors.Is(err, exiftool.ErrKeyNotFound) && errors.Is(fallbackErr, exiftool.ErrKeyNotFound):
+			// a screenshot, or a photo whose EXIF lost its date
+			return photo, errNoShootingTime
+		case fallbackErr != nil:
 			return photo, fmt.Errorf("error on both SubSecDateTimeOriginal (%w) and DateTimeOriginal: %w", err, fallbackErr)
 		}
 	}
@@ -798,12 +805,15 @@ func getExifdata(et *exiftool.Exiftool, path string) (Photo, error) {
 	return Photo{
 		Name:      filename,
 		Path:      sourceFile,
-		Dir:       filepath.Dir(path),
+		Dir:       filepath.Dir(photo.Path),
 		Extension: ext,
 		Camera:    strings.TrimSpace(camera),
 		CreatedAt: createdAt,
 	}, nil
 }
+
+// errNoShootingTime is the error of a photo whose EXIF has no shooting time.
+var errNoShootingTime = errors.New("no shooting time in its EXIF; skipped")
 
 func getExifTime(fileInfo exiftool.FileMetadata, key string) (time.Time, error) {
 	value, err := fileInfo.GetString(key)
