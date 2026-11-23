@@ -129,6 +129,11 @@ type tuiModel struct {
 	// dark tells the terminal's background, for the color of the cursor's
 	// line
 	dark bool
+	// cursorY is the row the prompt left the cursor on, -1 until the
+	// terminal tells; settled is set once it has, or the wait is over:
+	// nothing is drawn before, so that the answer is where the prompt is
+	cursorY int
+	settled bool
 
 	insert  bool
 	confirm bool
@@ -151,6 +156,7 @@ func newTUIModel(args, images []string, format, destDir string, dry, clean bool,
 		byKey:    map[string]*tuiRow{},
 		folded:   map[string]bool{},
 		expanded: map[string]bool{},
+		cursorY:  -1,
 		width:    width,
 		height:   height,
 		spinner:  spinner.New(spinner.WithSpinner(spinner.Jump), spinner.WithStyle(Cyan)),
@@ -164,7 +170,19 @@ func newTUIModel(args, images []string, format, destDir string, dry, clean bool,
 	return m
 }
 
-func (m tuiModel) Init() tea.Cmd { return m.spinner.Tick }
+func (m tuiModel) Init() tea.Cmd {
+	// The screen reaches from the prompt down, as gomi's does: ask where
+	// the cursor is before drawing; a terminal that does not tell gets
+	// half its rows after a while
+	return tea.Batch(m.spinner.Tick, tea.RequestCursorPosition, tea.Tick(cursorWait, func(time.Time) tea.Msg { return cursorWaitedMsg{} }))
+}
+
+// cursorWait is how long the screen waits for the terminal to tell where
+// the cursor is before drawing without it.
+var cursorWait = 250 * time.Millisecond
+
+// cursorWaitedMsg says the wait for the cursor position is over.
+type cursorWaitedMsg struct{}
 
 // setFormat sets the format, puts the cursor at its end, and plans again.
 func (m *tuiModel) setFormat(f string) {
@@ -273,6 +291,16 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 
+	case tea.CursorPositionMsg:
+		// it may come after the wait; asked before anything was drawn, it
+		// still tells where the prompt left the cursor
+		m.cursorY, m.settled = msg.Y, true
+		return m, nil
+
+	case cursorWaitedMsg:
+		m.settled = true
+		return m, nil
+
 	case exifResultMsg:
 		r := m.byKey[msg.image]
 		if r == nil || r.read {
@@ -373,7 +401,7 @@ func (m tuiModel) ready() (bool, string) {
 		return false, "after EXIF"
 	case m.tplErr != "":
 		return false, "fix the format"
-	case len(m.photos()) == 0:
+	case m.countMoves() == 0:
 		return false, "nothing to rename"
 	}
 	return true, ""
@@ -628,10 +656,29 @@ func saveFormat(path, format string) error {
 
 // ================= view =================
 
-// listHeight is how many lines the list or the tree gets: the screen less
-// the header, the format's box, the parts, the counts, a line and the keys.
+// listHeight is how many lines the list or the tree gets: as many as it
+// has, within the screen less the header, the format's box, the parts,
+// the counts, a line and the keys.
 func (m tuiModel) listHeight() int {
-	return max(3, m.viewHeight()-8)
+	return max(0, min(len(m.items()), m.maxHeight()-m.fixedLines()))
+}
+
+// tight reports whether the terminal is too low for every line: the parts
+// and the notice are then left out.
+func (m tuiModel) tight() bool {
+	return m.height > 0 && m.height-1 < 11
+}
+
+// fixedLines counts the lines besides the list: the header, the format's
+// box, the parts, the counts, a line and the keys; two fewer when tight.
+func (m tuiModel) fixedLines() int {
+	switch {
+	case m.tight() && m.tplErr != "":
+		return 7 // the error stays
+	case m.tight():
+		return 6
+	}
+	return 8
 }
 
 // resetSGR matches the resets of the styles, after which the background of
@@ -656,17 +703,32 @@ func (m tuiModel) highlight(line string, width int) string {
 	return bg + padRight(line, width) + "\x1b[49m"
 }
 
-// viewHeight is how many lines the screen takes: the terminal less a line
-// for the cursor, within limits.
+// viewHeight is how many lines the screen takes: what it has to show.
 func (m tuiModel) viewHeight() int {
-	return max(12, min(m.height-1, 40))
+	return m.listHeight() + m.fixedLines()
+}
+
+// maxHeight is the most lines the screen takes, as gomi's "auto" height:
+// half the terminal, or the rows from the prompt down when there are more,
+// less a line for the cursor, and at least a few rows of the list.
+func (m tuiModel) maxHeight() int {
+	n := m.height / 2
+	if m.cursorY >= 0 {
+		n = max(n, m.height-m.cursorY)
+	}
+	n = max(11, min(n, m.height)-1)
+	if m.height > 0 {
+		// never taller than the terminal, less the cursor's line
+		n = min(n, m.height-1)
+	}
+	return n
 }
 
 func (m tuiModel) View() tea.View {
 	if m.run != nil {
 		return m.run.View()
 	}
-	if m.result != tuiRunning {
+	if m.result != tuiRunning || !m.settled {
 		return tea.NewView("")
 	}
 	return tea.NewView(strings.Join(m.lines(time.Now()), "\n"))
@@ -708,8 +770,11 @@ func (m tuiModel) lines(now time.Time) []string {
 	lines = append(lines, border.Render("│")+padRight(body, inner)+border.Render("│"))
 	lines = append(lines, border.Render("╰"+strings.Repeat("─", max(0, inner))+"╯"))
 
-	// the parts of the selected photo, or what is wrong with the format
-	if m.tplErr != "" {
+	// the parts of the selected photo, or what is wrong with the format;
+	// the error stays on a low terminal, the parts do not
+	if m.tight() && m.tplErr == "" {
+		// left out
+	} else if m.tplErr != "" {
 		lines = append(lines, fitLine("  "+Red.Render(iconError+" "+m.tplErr), w))
 	} else {
 		lines = append(lines, fitLine(m.partsLine(), w))
@@ -736,17 +801,21 @@ func (m tuiModel) lines(now time.Time) []string {
 
 	// what the photos would get, then the keys
 	lines = append(lines, spread(m.countLine(), Dim.Render(fmt.Sprintf("%d/%d ", min(top+n, len(items)), len(items))), w))
-	lines = append(lines, fitLine("  "+m.notice, w))
+	if !m.tight() {
+		lines = append(lines, fitLine("  "+m.notice, w))
+	}
 	lines = append(lines, fitLine("  "+m.help(), w))
 	return lines
 }
 
 // where names what the photos were given as: the argument, or how many.
 func (m tuiModel) where() string {
-	if len(m.args) == 1 {
-		return m.args[0]
+	home := os.Getenv("HOME")
+	names := make([]string, len(m.args))
+	for i, a := range m.args {
+		names[i] = abbrevHome(filepath.Clean(a), home)
 	}
-	return strings.Join(m.args, ", ")
+	return strings.Join(names, ", ")
 }
 
 // base is the directory the format starts from, for the selected photo.
@@ -934,6 +1003,17 @@ func (m tuiModel) countLine() string {
 	return "  " + joinDim(parts)
 }
 
+// countMoves counts the photos that get another path.
+func (m tuiModel) countMoves() int {
+	n := 0
+	for _, r := range m.rows {
+		if r.usable() && !r.same && r.target != "" {
+			n++
+		}
+	}
+	return n
+}
+
 // countFileTime counts the photos given the file's time.
 func (m tuiModel) countFileTime() int {
 	n := 0
@@ -948,7 +1028,7 @@ func (m tuiModel) countFileTime() int {
 // help lists the keys of the mode, or asks to confirm.
 func (m tuiModel) help() string {
 	if m.confirm {
-		n := len(m.photos())
+		n := m.countMoves()
 		what := fmt.Sprintf("Rename %d %s?", n, plural(n, "photo", "photos"))
 		if m.dry {
 			what = fmt.Sprintf("Try renaming %d %s (dry run)?", n, plural(n, "photo", "photos"))
