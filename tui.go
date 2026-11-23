@@ -134,6 +134,9 @@ type tuiModel struct {
 	// nothing is drawn before, so that the answer is where the prompt is
 	cursorY int
 	settled bool
+	// peak is the most lines the screen has drawn: the terminal scrolled
+	// up for them, and the screen stays where they put it when it shrinks
+	peak int
 
 	insert  bool
 	confirm bool
@@ -259,6 +262,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if tm.sel >= tm.top+n {
 			tm.top = tm.sel - n + 1
 		}
+		if tm.settled {
+			tm.peak = max(tm.peak, tm.viewHeight())
+		}
 		return tm, cmd
 	}
 	return next, cmd
@@ -322,6 +328,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		return m.key(msg)
+
+	case tea.MouseMsg:
+		return m.mouse(msg)
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -731,7 +740,11 @@ func (m tuiModel) View() tea.View {
 	if m.result != tuiRunning || !m.settled {
 		return tea.NewView("")
 	}
-	return tea.NewView(strings.Join(m.lines(time.Now()), "\n"))
+	v := tea.NewView(strings.Join(m.lines(time.Now()), "\n"))
+	if m.mouseOn() {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
+	return v
 }
 
 func (m tuiModel) lines(now time.Time) []string {
@@ -756,11 +769,7 @@ func (m tuiModel) lines(now time.Time) []string {
 		title = Magenta.Bold(true).Render("Format")
 	}
 	lines = append(lines, border.Render("╭─ ")+title+border.Render(" "+strings.Repeat("─", max(0, inner-9))+"╮"))
-	hint := "i edit  "
-	if m.insert {
-		hint = "editing  "
-	}
-	boxRight := Dim.Render(hint+m.presetLabel()+"  tab ›") + " "
+	boxRight := Dim.Render(m.boxHint()+m.boxTail()) + " "
 	boxLeft := " " + Blue.Render(m.base()) + m.formatView()
 	// a long format is cut rather than the hint on the right
 	if room := inner - ansi.StringWidth(boxRight) - 1; ansi.StringWidth(boxLeft) > room {
