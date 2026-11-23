@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Record all VHS tapes in parallel, then convert MP4→GIF sequentially.
+# Record the VHS tapes one at a time, then convert MP4→GIF.
 #
-# Each container gets resource limits to prevent starvation when running
-# in parallel. GIF generation is done separately via ffmpeg because VHS's
-# built-in GIF output is unreliable under parallel Docker on macOS.
+# The tapes are recorded one after another: recorded in parallel, VHS
+# drops frames, and a recording comes out at about 60% of the time its
+# tape takes, too quick to follow. GIF generation is done separately via
+# ffmpeg because VHS's built-in GIF output is unreliable in Docker on
+# macOS.
 #
 # Usage: vhs.sh [-e KEY=VAL ...] [NAME ...]
 #   NAME  a tape to record, without .tape (demo, ...); all when none
@@ -39,27 +41,20 @@ fi
 # Build the image with tree installed (cached after the first build)
 docker build -q -t "$VHS_IMAGE" "$SCRIPT_DIR"
 
-echo "Recording ${#tapes[@]} tapes in parallel ..."
+echo "Recording ${#tapes[@]} tapes ..."
 
-pids=()
 names=()
+failures=0
 for tape in "${tapes[@]}"; do
   name="$(basename "$tape" .tape)"
   names+=("$name")
   echo "  ▶ $name"
-  docker run --rm \
+  if docker run --rm \
     --memory=2g --cpus=2 \
     -v "$SCRIPT_DIR":/data \
     -w /data \
     ${docker_flags[@]+"${docker_flags[@]}"} \
-    "$VHS_IMAGE" "$name.tape" &
-  pids+=($!)
-done
-
-failures=0
-for i in "${!pids[@]}"; do
-  name="${names[$i]}"
-  if wait "${pids[$i]}"; then
+    "$VHS_IMAGE" "$name.tape"; then
     echo "  ✓ $name"
   else
     echo "  ✗ $name"

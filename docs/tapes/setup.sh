@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Setup for demo.tape: a memory card copied to ~/Pictures/import, with a
+# Setup for the tapes: a memory card copied to ~/Pictures/import, with a
 # camera's RAW and JPEG pairs (two shots in the same second among them), an
 # iPhone folder with a sidecar file and a screenshot without EXIF data, and
 # two photos already named. The photos are a few bytes each; mock-exiftool
@@ -12,6 +12,8 @@ chmod +x /usr/local/bin/naminator /usr/local/bin/exiftool
 
 export MOCK_DATES=/tmp/mock-dates MOCK_DELAY=2
 export LANG=C.UTF-8
+# the terminal of VHS draws 24-bit colors, as the cursor's line uses
+export COLORTERM=truecolor
 export XDG_DATA_HOME=/tmp/xdg
 : > "$MOCK_DATES"
 
