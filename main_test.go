@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barasher/go-exiftool"
+
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -1010,4 +1012,16 @@ func firstClean(msgs []tea.Msg) (cleanResultMsg, bool) {
 	}
 	msg, ok := msgs[0].(cleanResultMsg)
 	return msg, ok
+}
+
+// A photo without a shooting time says so, rather than the keys missing.
+func TestPhotoOfNoShootingTime(t *testing.T) {
+	info := exiftool.FileMetadata{Fields: map[string]any{"FileName": "screenshot.jpg", "SourceFile": "a/screenshot.jpg"}}
+	if _, err := photoOf(Photo{}, info); !errors.Is(err, errNoShootingTime) || err.Error() != "no shooting time in its EXIF; skipped" {
+		t.Errorf("err = %v", err)
+	}
+	info.Fields["DateTimeOriginal"] = "not a date"
+	if _, err := photoOf(Photo{}, info); err == nil || errors.Is(err, errNoShootingTime) {
+		t.Errorf("a date that cannot be read: err = %v", err)
+	}
 }
