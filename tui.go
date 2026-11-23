@@ -441,10 +441,10 @@ func (m tuiModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.sel = min(len(m.items())-1, m.sel+1)
 		return m, nil
 	case "pgup":
-		m.sel = max(0, m.sel-10)
+		m.page(-1)
 		return m, nil
 	case "pgdown":
-		m.sel = min(len(m.items())-1, m.sel+10)
+		m.page(1)
 		return m, nil
 	case "ctrl+t":
 		m.toggleView()
@@ -490,6 +490,10 @@ func (m tuiModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.sel = min(len(m.items())-1, m.sel+1)
 	case "k":
 		m.sel = max(0, m.sel-1)
+	case "ctrl+u":
+		m.page(-1)
+	case "ctrl+d":
+		m.page(1)
 	case "g":
 		m.sel = 0
 	case "G":
@@ -1079,6 +1083,14 @@ func spread(left, right string, width int) string {
 		return fitLine(left, width)
 	}
 	return left + strings.Repeat(" ", gap) + right
+}
+
+// page moves the cursor and the lines shown by a page of the list, up
+// (-1) or down (1), as a pager does.
+func (m *tuiModel) page(dir int) {
+	n := m.listHeight() * dir
+	m.sel = max(0, min(len(m.items())-1, m.sel+n))
+	m.top = max(0, m.top+n)
 }
 
 // shown writes a path of a row from the parent of the argument the photo

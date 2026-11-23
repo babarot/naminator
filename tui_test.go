@@ -62,8 +62,8 @@ func keys(s ...string) []tea.Msg {
 			out = append(out, tea.KeyPressMsg{Code: tea.KeyTab})
 		case "backspace":
 			out = append(out, tea.KeyPressMsg{Code: tea.KeyBackspace})
-		case "ctrl+c":
-			out = append(out, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+		case "ctrl+c", "ctrl+d", "ctrl+u":
+			out = append(out, tea.KeyPressMsg{Code: rune(k[len(k)-1]), Mod: tea.ModCtrl})
 		default:
 			for _, r := range k {
 				out = append(out, tea.KeyPressMsg{Code: r, Text: string(r)})
@@ -904,5 +904,28 @@ func TestTUITreeArrows(t *testing.T) {
 	}
 	if col < 0 {
 		t.Fatal("no ← in the tree")
+	}
+}
+
+// ctrl+d and ctrl+u, as page down and page up, move the cursor and the
+// lines shown by a page.
+func TestTUIPage(t *testing.T) {
+	m := newMouseTUI(t, 60, 0)
+	n := m.listHeight()
+	m = m.send(t, keys("ctrl+d")...)
+	if m.sel != n || m.top != n {
+		t.Errorf("ctrl+d: sel = %d, top = %d, want %d", m.sel, m.top, n)
+	}
+	m = m.send(t, keys("ctrl+d", "ctrl+d", "ctrl+d", "ctrl+d")...)
+	if m.sel != 59 || m.top != 60-n {
+		t.Errorf("ctrl+d at the end: sel = %d, top = %d", m.sel, m.top)
+	}
+	m = m.send(t, keys("ctrl+u")...)
+	if m.sel != 59-n || m.top != 60-2*n {
+		t.Errorf("ctrl+u: sel = %d, top = %d, want %d, %d", m.sel, m.top, 59-n, 60-2*n)
+	}
+	m = m.send(t, tea.KeyPressMsg{Code: tea.KeyPgUp}, tea.KeyPressMsg{Code: tea.KeyPgUp}, tea.KeyPressMsg{Code: tea.KeyPgUp})
+	if m.sel != 0 || m.top != 0 {
+		t.Errorf("pgup at the top: sel = %d, top = %d", m.sel, m.top)
 	}
 }
