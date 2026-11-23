@@ -881,3 +881,28 @@ func TestTUIShownPath(t *testing.T) {
 		t.Errorf("relative: %q", got)
 	}
 }
+
+// The "←" of the files renamed line up in the tree, also across
+// directories and names of other lengths.
+func TestTUITreeArrows(t *testing.T) {
+	m, photos := newTestTUI(t, 4)
+	m = m.send(t, readAll(photos)...)
+	m.setFormat("{dir}/{date}/{date}_{time}")
+	m = m.send(t, keys("t")...)
+	col := -1
+	for _, l := range treeText(m) {
+		before, _, ok := strings.Cut(l, "←")
+		if !ok {
+			continue
+		}
+		w := ansi.StringWidth(before)
+		if col >= 0 && w != col {
+			t.Errorf("← at %d, want %d:\n%s", w, col, strings.Join(treeText(m), "\n"))
+			break
+		}
+		col = w
+	}
+	if col < 0 {
+		t.Fatal("no ← in the tree")
+	}
+}
