@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""A stand-in for exiftool in the demo: it speaks the -stay_open protocol
-that go-exiftool uses, and answers each file with the shooting time listed
-for its name in $MOCK_DATES ("name|YYYY:MM:DD HH:MM:SS|model" per line, the
-camera model optional), after a
-delay that varies by file, as reading a real photo does. A file not listed
-has no shooting time, as a screenshot."""
+"""A stand-in for exiftool in the demo: it speaks the -stay_open protocol as
+naminator uses it (exiftool.go), and answers each file with the shooting
+time listed for its name in $MOCK_DATES ("name|YYYY:MM:DD HH:MM:SS|model"
+per line, the camera model optional), after a delay that varies by file, as
+reading a real photo does. A file not listed has no shooting time, as a
+screenshot."""
 import hashlib
 import json
 import os
@@ -43,4 +43,8 @@ for line in sys.stdin:
         out.append(info)
     sys.stdout.write(json.dumps(out) + "\n{ready}\n")
     sys.stdout.flush()
+    # naminator passes -echo4 {ready}: exiftool ends its stderr for each
+    # command with it too
+    sys.stderr.write("{ready}\n")
+    sys.stderr.flush()
     args = []

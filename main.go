@@ -17,7 +17,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/barasher/go-exiftool"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/jessevdk/go-flags"
 	"github.com/mattn/go-isatty"
@@ -78,28 +77,6 @@ func (osFS) MkdirAll(path string, perm os.FileMode) error { return os.MkdirAll(p
 func (osFS) RemoveAll(path string) error                  { return os.RemoveAll(path) }
 func (osFS) Stat(name string) (os.FileInfo, error)        { return os.Stat(name) }
 func (osFS) ReadDir(name string) ([]os.DirEntry, error)   { return os.ReadDir(name) }
-
-// exiftoolExtractor is the real ExifExtractor using go-exiftool. It keeps
-// one exiftool process running (stay_open) and reuses it for every file.
-type exiftoolExtractor struct {
-	et *exiftool.Exiftool
-}
-
-func newExiftoolExtractor() (exiftoolExtractor, error) {
-	et, err := exiftool.NewExiftool()
-	if err != nil {
-		return exiftoolExtractor{}, fmt.Errorf("failed to run exiftool: %w", err)
-	}
-	return exiftoolExtractor{et: et}, nil
-}
-
-func (e exiftoolExtractor) Extract(path string) (Photo, error) {
-	return getExifdata(e.et, path)
-}
-
-func (e exiftoolExtractor) Close() error {
-	return e.et.Close()
-}
 
 type CLI struct {
 	args   []string
@@ -256,10 +233,11 @@ func runMain() error {
 		return errors.New("no images given")
 	}
 
-	// go-exiftool serializes calls on one process, so give each worker its own
+	// One exiftool process answers one file at a time, so give each worker
+	// its own
 	var exifs []ExifExtractor
 	for range min(runtime.NumCPU(), len(images)) {
-		e, err := newExiftoolExtractor()
+		e, err := startExiftool()
 		if err != nil {
 			return err
 		}
@@ -745,24 +723,12 @@ type Photo struct {
 	CreatedAt time.Time
 }
 
-func getExifdata(et *exiftool.Exiftool, path string) (Photo, error) {
-	base := filepath.Base(path)
-
+// photoFromMetadata makes the Photo of the file at path from what exiftool
+// reported about it.
+func photoFromMetadata(path string, fileInfo fileMetadata) (Photo, error) {
 	photo := Photo{
-		Name: base,
+		Name: filepath.Base(path),
 		Path: path,
-	}
-
-	fileInfos := et.ExtractMetadata(path)
-	if len(fileInfos) == 0 {
-		return photo, errors.New("failed to extract metadata")
-	}
-	// ExtractMetadata can deal with multiple files at once but this function only uses one argument
-	// so it's enough to reference the first element in fileInfos.
-	fileInfo := fileInfos[0]
-
-	if fileInfo.Err != nil {
-		return photo, fmt.Errorf("file info error: %w", fileInfo.Err)
 	}
 
 	filename, err := fileInfo.GetString("FileName")
@@ -805,7 +771,7 @@ func getExifdata(et *exiftool.Exiftool, path string) (Photo, error) {
 	}, nil
 }
 
-func getExifTime(fileInfo exiftool.FileMetadata, key string) (time.Time, error) {
+func getExifTime(fileInfo fileMetadata, key string) (time.Time, error) {
 	value, err := fileInfo.GetString(key)
 	if err != nil {
 		return time.Time{}, err
