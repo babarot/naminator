@@ -62,8 +62,8 @@ func keys(s ...string) []tea.Msg {
 			out = append(out, tea.KeyPressMsg{Code: tea.KeyTab})
 		case "backspace":
 			out = append(out, tea.KeyPressMsg{Code: tea.KeyBackspace})
-		case "ctrl+c":
-			out = append(out, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+		case "ctrl+c", "ctrl+d", "ctrl+u":
+			out = append(out, tea.KeyPressMsg{Code: rune(k[len(k)-1]), Mod: tea.ModCtrl})
 		default:
 			for _, r := range k {
 				out = append(out, tea.KeyPressMsg{Code: r, Text: string(r)})
@@ -361,7 +361,7 @@ func treeText(m tuiModel) []string {
 
 func TestTUITree(t *testing.T) {
 	m := newCardsTUI(t)
-	m = m.send(t, keys("t")...)
+	m = m.send(t, keys("v")...)
 	if m.view != viewTree {
 		t.Fatal("t should show the tree")
 	}
@@ -392,7 +392,7 @@ func TestTUITree(t *testing.T) {
 // format changes: the top is never folded, and l on it opens everything.
 // The cursor stays on a line when the tree gets shorter.
 func TestTUITreeAfterFormatChange(t *testing.T) {
-	m := newCardsTUI(t).send(t, keys("t")...)
+	m := newCardsTUI(t).send(t, keys("v")...)
 	// fold every directory, then pick a format with fewer of them
 	m = m.send(t, keys("g", "h", "G")...)
 	for _, it := range m.items() {
@@ -421,7 +421,7 @@ func TestTUITreeAfterFormatChange(t *testing.T) {
 func TestTUITreeFoldTop(t *testing.T) {
 	m, photos := newTestTUI(t, 10)
 	m = m.send(t, readAll(photos)...)
-	m = m.send(t, keys("t")...)
+	m = m.send(t, keys("v")...)
 	if n := len(m.items()); n < 3 {
 		t.Fatalf("tree has %d lines", n)
 	}
@@ -445,7 +445,7 @@ func TestTUITreeFoldTop(t *testing.T) {
 }
 
 func TestTUITreeFold(t *testing.T) {
-	m := newCardsTUI(t).send(t, keys("t")...)
+	m := newCardsTUI(t).send(t, keys("v")...)
 	find := func(m tuiModel, text string) int {
 		for i, line := range treeText(m) {
 			if strings.Contains(line, text) {
@@ -482,7 +482,7 @@ func TestTUITreeFold(t *testing.T) {
 		t.Errorf("after folding all: %d lines:\n%s", n, strings.Join(treeText(m), "\n"))
 	}
 	// h and l do nothing in the list
-	m = m.send(t, keys("t", "j", "h")...)
+	m = m.send(t, keys("v", "j", "h")...)
 	if m.view != viewList || m.sel != 1 {
 		t.Errorf("view = %v, sel = %d", m.view, m.sel)
 	}
@@ -768,7 +768,7 @@ func TestTUIMouseClickList(t *testing.T) {
 		t.Errorf("the click should put the cursor on DSC00004.JPG, sel = %d", m.sel)
 	}
 	// in the tree, a second click on a directory folds it
-	m = m.send(t, keys("t")...)
+	m = m.send(t, keys("v")...)
 	fx, fy := find(t, m, "DSC00001.JPG")
 	m = m.send(t, click(m, fx, fy))
 	x, y = find(t, m, "card/")
@@ -854,8 +854,116 @@ func TestTUIFrameTop(t *testing.T) {
 		t.Errorf("frameTop = %d, want %d", got, want)
 	}
 	top := m.frameTop()
-	m = m.send(t, keys("t", "g", "h")...) // the tree, folded to its top
+	m = m.send(t, keys("v", "g", "h")...) // the tree, folded to its top
 	if m.frameTop() != top {
 		t.Errorf("frameTop = %d after the screen shrank, want %d", m.frameTop(), top)
+	}
+}
+
+// The paths of the rows are written from the parent of the argument, as
+// the arguments are usually given, also when given as absolute paths.
+func TestTUIShownPath(t *testing.T) {
+	t.Setenv("HOME", "/home/u")
+	m := tuiModel{args: []string{"/home/u/Desktop/panda/"}}
+	r := &tuiRow{key: "/home/u/Desktop/panda/A7C02795.ARW"}
+	for path, want := range map[string]string{
+		r.key:                              "panda/A7C02795.ARW",
+		"/home/u/Desktop/panda/2025/a.arw": "panda/2025/a.arw",
+		"/home/u/Desktop/2025-08-22/a.arw": "2025-08-22/a.arw",
+		"/home/u/Pictures/out/a.arw":       "~/Pictures/out/a.arw",
+	} {
+		if got := m.shown(r, path); got != want {
+			t.Errorf("shown(%q) = %q, want %q", path, got, want)
+		}
+	}
+	rel := tuiModel{args: []string{"card"}}
+	if got := rel.shown(&tuiRow{key: "card/DSC00001.JPG"}, "card/DSC00001.JPG"); got != "card/DSC00001.JPG" {
+		t.Errorf("relative: %q", got)
+	}
+}
+
+// The "←" of the files renamed line up in the tree, also across
+// directories and names of other lengths.
+func TestTUITreeArrows(t *testing.T) {
+	m, photos := newTestTUI(t, 4)
+	m = m.send(t, readAll(photos)...)
+	m.setFormat("{dir}/{date}/{date}_{time}")
+	m = m.send(t, keys("v")...)
+	col := -1
+	for _, l := range treeText(m) {
+		before, _, ok := strings.Cut(l, "←")
+		if !ok {
+			continue
+		}
+		w := ansi.StringWidth(before)
+		if col >= 0 && w != col {
+			t.Errorf("← at %d, want %d:\n%s", w, col, strings.Join(treeText(m), "\n"))
+			break
+		}
+		col = w
+	}
+	if col < 0 {
+		t.Fatal("no ← in the tree")
+	}
+}
+
+// ctrl+d and ctrl+u, as page down and page up, move the cursor and the
+// lines shown by a page.
+func TestTUIPage(t *testing.T) {
+	m := newMouseTUI(t, 60, 0)
+	// each ctrl+d puts the cursor on the first line not shown before, and
+	// shows the lines from it
+	for range 2 {
+		before := m.window()
+		m = m.send(t, keys("ctrl+d")...)
+		if want := before.top + before.rows; m.sel != want || m.window().top != want {
+			t.Fatalf("ctrl+d: sel = %d, top = %d, want %d", m.sel, m.window().top, want)
+		}
+	}
+	m = m.send(t, keys("ctrl+d", "ctrl+d", "ctrl+d")...)
+	if w := m.window(); m.sel != 59 || w.top+w.rows != 60 || w.down {
+		t.Errorf("ctrl+d at the end: sel = %d, window = %+v", m.sel, w)
+	}
+	m = m.send(t, keys("ctrl+u")...)
+	if w := m.window(); m.sel >= 59 || m.sel < w.top || m.sel >= w.top+w.rows {
+		t.Errorf("ctrl+u: sel = %d, window = %+v", m.sel, w)
+	}
+	m = m.send(t, tea.KeyPressMsg{Code: tea.KeyPgUp}, tea.KeyPressMsg{Code: tea.KeyPgUp}, tea.KeyPressMsg{Code: tea.KeyPgUp}, tea.KeyPressMsg{Code: tea.KeyPgUp})
+	if w := m.window(); m.sel != 0 || w.top != 0 || w.up {
+		t.Errorf("pgup at the top: sel = %d, window = %+v", m.sel, w)
+	}
+}
+
+// When the list does not fit, a line says how many more lines there are
+// below, and above once it has moved; the cursor always stays on a line
+// shown, and the list never takes more lines than it has.
+func TestTUIMoreLines(t *testing.T) {
+	m := newMouseTUI(t, 60, 0)
+	n := m.listHeight()
+	text := func() string { return ansi.Strip(strings.Join(m.lines(time.Now()), "\n")) }
+	if !strings.Contains(text(), fmt.Sprintf("↓ %d more", 60-(n-1))) || strings.Contains(text(), "↑") {
+		t.Fatalf("at the top:\n%s", text())
+	}
+	for i := range 60 {
+		w := m.window()
+		if m.sel < w.top || m.sel >= w.top+w.rows || w.rows+btoi(w.up)+btoi(w.down) != n {
+			t.Fatalf("sel %d: window %+v, n = %d", i, w, n)
+		}
+		m = m.send(t, keys("j")...)
+	}
+	if !strings.Contains(text(), "↑ ") || strings.Contains(text(), "↓") {
+		t.Errorf("at the end:\n%s", text())
+	}
+	// a click on the line below pages down
+	m = m.send(t, keys("g")...)
+	x, y := find(t, m, "↓ ")
+	m = m.send(t, click(m, x, y))
+	if m.sel != n-1 {
+		t.Errorf("a click on ↓ should page down, sel = %d", m.sel)
+	}
+	// everything fits: no lines for more
+	few := newMouseTUI(t, 3, 0)
+	if s := ansi.Strip(strings.Join(few.lines(time.Now()), "\n")); strings.Contains(s, "more  (ctrl") {
+		t.Errorf("3 photos:\n%s", s)
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // The tree view of the interactive screen: the directories as they will be
@@ -176,6 +178,10 @@ func (m tuiModel) treeItems() []tuiItem {
 	if m.folded[root.path] {
 		rootMark = "▸ "
 	}
+	// the column of "←", after the longest line of a file renamed, so that
+	// the old paths line up; a longer line goes past it
+	arrowCol := 0
+	arrowAt := &arrowCol
 	items := []tuiItem{{kind: itemRoot, path: root.path, draw: func(sel bool) string {
 		return lead(sel) + Dim.Render(rootMark) + Blue.Render(root.name+"/") + root.countText()
 	}}}
@@ -255,8 +261,12 @@ func (m tuiModel) treeItems() []tuiItem {
 				}})
 			default:
 				f := *l.file
+				w := ansi.StringWidth(prefix+branch) + ansi.StringWidth(f.name)
+				if m.arrowed(f) {
+					arrowCol = max(arrowCol, min(w, maxArrowCol))
+				}
 				items = append(items, tuiItem{kind: itemFile, row: f.row, path: d.path, draw: func(sel bool) string {
-					return lead(sel) + Dim.Render(prefix+branch) + m.fileText(f)
+					return lead(sel) + Dim.Render(prefix+branch) + m.fileText(f, *arrowAt-w)
 				}})
 			}
 		}
@@ -268,8 +278,19 @@ func (m tuiModel) treeItems() []tuiItem {
 	return items
 }
 
-// fileText draws a file of the tree.
-func (m tuiModel) fileText(f treeFile) string {
+// maxArrowCol is the furthest the column of "←" goes.
+const maxArrowCol = 56
+
+// arrowed reports whether a file of the tree is drawn with "←" and the
+// path it comes from: a photo renamed.
+func (m tuiModel) arrowed(f treeFile) bool {
+	r := f.row
+	return !f.sidecar && r.read && !r.skipped() && !r.same && m.tplErr == ""
+}
+
+// fileText draws a file of the tree, its name padded by pad cells before
+// "←".
+func (m tuiModel) fileText(f treeFile, pad int) string {
 	r := f.row
 	switch {
 	case f.sidecar:
@@ -281,7 +302,7 @@ func (m tuiModel) fileText(f treeFile) string {
 	case r.same || m.tplErr != "":
 		return Dim.Render(f.name + "  (already named)")
 	}
-	s := f.name + Dim.Render("  ← "+r.key)
+	s := f.name + strings.Repeat(" ", max(0, pad)) + Dim.Render("  ← "+m.shown(r, r.key))
 	if r.suffix != "" {
 		s += "  " + Yellow.Render(r.suffix)
 	}

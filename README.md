@@ -89,13 +89,14 @@ In a terminal, naminator first opens a screen that lists the path each photo wou
 | `tab` / `shift+tab` | Go through the presets |
 | `i` / `a` | Edit the format (`esc` or `enter` to finish) |
 | `j` / `k`, `g` / `G` | Move |
-| `t` | Switch between the list and a tree of the directories as they will be |
+| `ctrl+d` / `ctrl+u` | Move a page down or up |
+| `v` | Switch between the list and a tree of the directories as they will be |
 | `h` / `l` | Fold or open a directory in the tree |
 | `m` | Use the file's modification time for a photo without a shooting time |
 | `ctrl+s` | Save the format as the default in the configuration |
 | `enter` | Rename, after asking |
 
-The mouse works too: the wheel moves, a click selects a line (a second click on a directory folds or opens it), and a click on the format, the preset or `view:` does what `i`, `tab` and `t` do. Renaming stays on `enter` and `y`.
+The mouse works too: the wheel moves, a click selects a line (a second click on a directory folds or opens it), and a click on the format, the preset or `view:` does what `i`, `tab` and `v` do. Renaming stays on `enter` and `y`.
 
 `--yes`, or running without a terminal for input and output (in a pipe, with input from a file, in a script or CI), renames without asking.
 

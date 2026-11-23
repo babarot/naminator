@@ -88,7 +88,16 @@ func (m tuiModel) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		case y == rowFormat:
 			m.clickFormat(x)
 		case y >= m.listTop() && y < m.listTop()+m.listHeight():
-			m.clickList(m.top + y - m.listTop())
+			win := m.window()
+			i := y - m.listTop() - btoi(win.up)
+			switch {
+			case i < 0:
+				m.page(-1) // the line of those above
+			case i >= win.rows:
+				m.page(1) // the line of those below
+			default:
+				m.clickList(win.top + i)
+			}
 		}
 	}
 	return m, nil
