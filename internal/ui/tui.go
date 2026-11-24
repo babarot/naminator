@@ -14,6 +14,7 @@ import (
 	"github.com/babarot/naminator/internal/photo"
 	"github.com/babarot/naminator/internal/rename"
 	"github.com/babarot/naminator/internal/ui/keymap"
+	"github.com/babarot/naminator/internal/ui/statusline"
 	"github.com/babarot/naminator/internal/ui/theme"
 
 	tea "charm.land/bubbletea/v2"
@@ -135,7 +136,11 @@ type tuiModel struct {
 	confirm bool
 	sel     int
 	top     int
-	notice  string
+	// line is the status line, and timerAt when it is drawn again for what
+	// it shows to go, zero when it is not to be
+	line    statusline.Line
+	timerAt time.Time
+	now     func() time.Time
 	width   int
 	height  int
 	spinner spinner.Model
@@ -148,7 +153,7 @@ func newTUIModel(args, images []string, format, destDir string, dry, clean bool,
 		width, height = w, h
 	}
 	m := tuiModel{
-		args: args, destDir: destDir, dry: dry, clean: clean, fs: fsys, cfgPath: cfgPath, presets: presets, cancel: cancel, keys: keymap.Default(), st: theme.For(true),
+		args: args, destDir: destDir, dry: dry, clean: clean, fs: fsys, cfgPath: cfgPath, presets: presets, cancel: cancel, keys: keymap.Default(), st: theme.For(true), now: time.Now,
 		byKey:    map[string]*tuiRow{},
 		folded:   map[string]bool{},
 		expanded: map[string]bool{},
@@ -238,7 +243,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		tm.sel = max(0, min(tm.sel, len(tm.items())-1))
 		// keep the lines shown, moving them only to keep the cursor in
 		tm.top = tm.window().top
-		return tm, cmd
+		return tm, tea.Batch(cmd, tm.timer())
 	}
 	return next, cmd
 }
@@ -250,6 +255,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		return m, nil
+
+	case statusDueMsg:
+		m.timerAt = time.Time{}
 		return m, nil
 
 	case tea.BackgroundColorMsg:
@@ -334,7 +343,7 @@ func (m tuiModel) ready() (bool, string) {
 // key handles a key: what it does is looked up for the state the screen is
 // in, so that a key never acts on what is under a question.
 func (m tuiModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.notice = ""
+	m.line.KeyPressed()
 	state := m.uiState()
 	a := m.keys.Action(msg.String(), state.scopes()...)
 	if a == keymap.Interrupt {
@@ -471,7 +480,7 @@ func (m *tuiModel) toggleFileTime() {
 	} else {
 		fi, err := os.Stat(r.key)
 		if err != nil {
-			m.notice = m.st.Failure.Render("no file time: " + err.Error())
+			m.line.Fail(m.now(), "no file time: "+err.Error())
 			return
 		}
 		r.fileTime = true
@@ -570,14 +579,14 @@ func (m tuiModel) presetLabel() string {
 // save writes the format to the configuration file as its format.
 func (m *tuiModel) save() {
 	if m.tplErr != "" {
-		m.notice = m.st.Failure.Render("not saved: " + m.tplErr)
+		m.line.Refuse(m.now(), "not saved: "+m.tplErr)
 		return
 	}
 	if err := config.SaveFormat(m.cfgPath, m.format); err != nil {
-		m.notice = m.st.Failure.Render("not saved: " + err.Error())
+		m.line.Fail(m.now(), "not saved: "+err.Error())
 		return
 	}
-	m.notice = m.st.Success.Render(iconSuccess) + m.st.Dim.Render(" saved as the format in "+abbrevHome(m.cfgPath, os.Getenv("HOME")))
+	m.line.Say(m.now(), "saved as the format in "+abbrevHome(m.cfgPath, os.Getenv("HOME")))
 }
 
 // ================= view =================
@@ -602,6 +611,35 @@ func (m tuiModel) tooLow() bool {
 	return m.height > 0 && m.height < minHeight
 }
 
+// statusDueMsg says that what the status line shows may go now.
+type statusDueMsg struct{}
+
+// timer draws the screen again when what the status line shows is to go.
+// It is set once for each.
+func (m *tuiModel) timer() tea.Cmd {
+	now := m.now()
+	due := m.line.Due(now)
+	if due.IsZero() || due.Equal(m.timerAt) {
+		return nil
+	}
+	m.timerAt = due
+	return tea.Tick(due.Sub(now), func(time.Time) tea.Msg { return statusDueMsg{} })
+}
+
+// status draws the status line.
+func (m tuiModel) status() string {
+	kind, text := m.line.Shown(m.now())
+	switch kind {
+	case statusline.Info:
+		return m.st.Success.Render(iconSuccess) + m.st.Dim.Render(" "+text)
+	case statusline.Refusal:
+		return m.st.Warn.Render(text)
+	case statusline.Failure:
+		return m.st.Failure.Render(text)
+	}
+	return ""
+}
+
 // highlight draws line, over width, as the cursor's.
 func (m tuiModel) highlight(line string, width int) string {
 	return m.st.CursorLine(padRight(line, width), m.uiState() == stateEdit)
@@ -617,14 +655,14 @@ func (m tuiModel) View() tea.View {
 	if m.result != tuiRunning {
 		return v
 	}
-	v.SetContent(strings.Join(m.lines(time.Now()), "\n"))
+	v.SetContent(strings.Join(m.lines(), "\n"))
 	if m.mouseOn() {
 		v.MouseMode = tea.MouseModeCellMotion
 	}
 	return v
 }
 
-func (m tuiModel) lines(now time.Time) []string {
+func (m tuiModel) lines() []string {
 	w := m.width
 	if m.uiState() == stateTooLow {
 		return []string{fitLine(" "+m.help(), w)}
@@ -690,7 +728,7 @@ func (m tuiModel) lines(now time.Time) []string {
 
 	// what the photos would get, then the keys
 	lines = append(lines, fitLine(m.countLine(), w))
-	lines = append(lines, fitLine("  "+m.notice, w))
+	lines = append(lines, fitLine("  "+m.status(), w))
 	lines = append(lines, fitLine("  "+m.help(), w))
 	return lines
 }

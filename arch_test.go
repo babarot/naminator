@@ -26,8 +26,9 @@ var layers = []layer{
 	{"internal/rename", 1, []string{"internal/photo"}, nil, "Where photos go: templates, paths no two photos share, sidecars, and the directories left empty"},
 	{"internal/config", 2, []string{"internal/rename"}, []string{"github.com/goccy/go-yaml"}, "The configuration file"},
 	{"internal/ui/keymap", 3, nil, nil, "Keys bound to actions by name"},
+	{"internal/ui/statusline", 3, nil, nil, "What the status line shows, for a moment"},
 	{"internal/ui/theme", 3, nil, []string{"charm.land/lipgloss/v2"}, "The colors, by what they are for, and their styles"},
-	{"internal/ui", 4, []string{"internal/config", "internal/photo", "internal/rename", "internal/ui/keymap", "internal/ui/theme"}, []string{"charm.land/bubbles/v2", "charm.land/bubbletea/v2", "github.com/charmbracelet/x/ansi", "github.com/mattn/go-isatty", "golang.org/x/sys", "golang.org/x/term"}, "The interactive screen and the display of a run"},
+	{"internal/ui", 4, []string{"internal/config", "internal/photo", "internal/rename", "internal/ui/keymap", "internal/ui/statusline", "internal/ui/theme"}, []string{"charm.land/bubbles/v2", "charm.land/bubbletea/v2", "github.com/charmbracelet/x/ansi", "github.com/mattn/go-isatty", "golang.org/x/sys", "golang.org/x/term"}, "The interactive screen and the display of a run"},
 	{"internal/cli", 5, []string{"internal/config", "internal/photo", "internal/rename", "internal/ui"}, []string{"github.com/jessevdk/go-flags", "github.com/mattn/go-isatty", "github.com/nxadm/tail"}, "The command line: the flags, the workers, and moving the files"},
 	{"", 6, []string{"internal/cli"}, nil, "Calls cli.Main with the version"},
 }

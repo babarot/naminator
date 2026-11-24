@@ -47,7 +47,7 @@ func (m tuiModel) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	mouse := msg.Mouse()
 	x, y := mouse.X, mouse.Y
-	m.notice = ""
+	m.line.KeyPressed()
 
 	switch msg := msg.(type) {
 	case tea.MouseWheelMsg:

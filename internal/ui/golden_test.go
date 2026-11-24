@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/babarot/naminator/internal/photo"
 	"github.com/babarot/naminator/internal/ui/theme"
 )
@@ -64,6 +66,8 @@ func goldenTUI(t *testing.T, n int, dark bool) tuiModel {
 		}
 	}
 	m.st = theme.For(dark)
+	m.now = func() time.Time { return goldenNow }
+	m.cfgPath = filepath.Join(os.Getenv("HOME"), "config.yaml")
 	return m.send(t, readAll(photos)...)
 }
 
@@ -139,6 +143,17 @@ func goldenCases() []goldenCase {
 			m.st = theme.Plain()
 			return m
 		}},
+		{"saved", 6, func(t *testing.T, m tuiModel) tuiModel {
+			return m.send(t, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+		}},
+		{"not-saved", 6, func(t *testing.T, m tuiModel) tuiModel {
+			m.setFormat("{date}/{nope}")
+			return m.send(t, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+		}},
+		{"save-failed", 6, func(t *testing.T, m tuiModel) tuiModel {
+			m.line.Fail(m.now(), "not saved: permission denied")
+			return m
+		}},
 		{"too-low", 6, func(t *testing.T, m tuiModel) tuiModel {
 			m.height = minHeight - 1
 			return m
@@ -154,7 +169,7 @@ func TestGoldenTUI(t *testing.T) {
 		}{{"dark", true}, {"light", false}} {
 			t.Run(tc.name+"/"+bg.name, func(t *testing.T) {
 				m := tc.at(t, bg.dark)
-				got := normalize(t, strings.Join(m.lines(goldenNow), "\n"))
+				got := normalize(t, strings.Join(m.lines(), "\n"))
 				compareGolden(t, filepath.Join(testdataDir(t), "tui", tc.name+"-"+bg.name+".golden"), got)
 			})
 		}
