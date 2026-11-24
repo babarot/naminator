@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/babarot/naminator/internal/photo"
 )
 
 var t0 = time.Date(2026, 10, 3, 14, 0, 0, 0, time.UTC)
@@ -21,7 +23,7 @@ func TestPhaseApply(t *testing.T) {
 		if p.items[0].status != itemRunning || p.items[1].status != itemQueued {
 			t.Fatalf("statuses = %v, %v", p.items[0].status, p.items[1].status)
 		}
-		it, f := p.apply(exifResultMsg{image: "/p/a.jpg", photo: Photo{Path: "/p/a.jpg"}, duration: duration(300 * time.Millisecond)}, t0.Add(time.Second))
+		it, f := p.apply(exifResultMsg{image: "/p/a.jpg", photo: photo.Photo{Path: "/p/a.jpg"}, duration: duration(300 * time.Millisecond)}, t0.Add(time.Second))
 		if it == nil || it.mark != markNone || f != nil {
 			t.Errorf("ok result: item=%+v failure=%v", it, f)
 		}
@@ -38,9 +40,9 @@ func TestPhaseApply(t *testing.T) {
 	t.Run("rename", func(t *testing.T) {
 		keys := []string{"/p/a.jpg", "/p/2026-10-03_14-00-00.jpg", "/p/c.jpg"}
 		p := newPhase(phaseStartMsg{kind: phaseRename, keys: keys, base: "/p"}, t0)
-		p.apply(renameResultMsg{photo: Photo{Name: "a.jpg", Path: "/p/a.jpg", RenamedPath: "/p/2026-10-03/x.jpg"}}, t0)
-		p.apply(renameResultMsg{photo: Photo{Name: "2026-10-03_14-00-00.jpg", Path: keys[1], RenamedPath: keys[1]}}, t0)
-		p.apply(renameResultMsg{photo: Photo{Name: "c.jpg", Path: "/p/c.jpg"}, err: errors.New("permission denied")}, t0.Add(time.Second))
+		p.apply(renameResultMsg{photo: photo.Photo{Name: "a.jpg", Path: "/p/a.jpg", RenamedPath: "/p/2026-10-03/x.jpg"}}, t0)
+		p.apply(renameResultMsg{photo: photo.Photo{Name: "2026-10-03_14-00-00.jpg", Path: keys[1], RenamedPath: keys[1]}}, t0)
+		p.apply(renameResultMsg{photo: photo.Photo{Name: "c.jpg", Path: "/p/c.jpg"}, err: errors.New("permission denied")}, t0.Add(time.Second))
 		if p.items[0].mark != markDone || p.items[0].label != "→ 2026-10-03/x.jpg" {
 			t.Errorf("renamed: mark=%v label=%q", p.items[0].mark, p.items[0].label)
 		}
@@ -57,7 +59,7 @@ func TestPhaseApply(t *testing.T) {
 
 	t.Run("dry-run rename", func(t *testing.T) {
 		p := newPhase(phaseStartMsg{kind: phaseRename, keys: []string{"/p/a.jpg"}, dry: true}, t0)
-		p.apply(renameResultMsg{photo: Photo{Name: "a.jpg", Path: "/p/a.jpg", RenamedPath: "/q/x.jpg"}, dryrun: true}, t0)
+		p.apply(renameResultMsg{photo: photo.Photo{Name: "a.jpg", Path: "/p/a.jpg", RenamedPath: "/q/x.jpg"}, dryrun: true}, t0)
 		if p.items[0].mark != markChange {
 			t.Errorf("mark = %v, want markChange", p.items[0].mark)
 		}
@@ -185,7 +187,7 @@ func TestPhaseCompactKeepsHeight(t *testing.T) {
 	full := len(p.compactView("x", t0, 120, 30))
 	// the queue empties and the running rows go away one by one
 	for i, k := range keys {
-		p.apply(exifResultMsg{image: k, photo: Photo{Path: k}}, t0)
+		p.apply(exifResultMsg{image: k, photo: photo.Photo{Path: k}}, t0)
 		if next := i + 8; next < len(keys) {
 			p.apply(exifStartMsg{image: keys[next]}, t0)
 		}

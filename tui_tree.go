@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/babarot/naminator/internal/rename"
 )
 
 // The tree view of the interactive screen: the directories as they will be
@@ -70,11 +72,11 @@ func (m tuiModel) tree() *treeDir {
 		if r.usable() && r.target != "" && m.tplErr == "" {
 			path = r.target
 		}
-		entries = append(entries, entry{absPath(path), treeFile{name: filepath.Base(path), row: r}})
+		entries = append(entries, entry{rename.AbsPath(path), treeFile{name: filepath.Base(path), row: r}})
 		if r.usable() && r.target != "" && !r.same && m.tplErr == "" {
 			for _, sc := range m.sidecars[r.photo.Path] {
-				to := sidecarTarget(r.photo.Path, r.target, sc)
-				entries = append(entries, entry{absPath(to), treeFile{name: filepath.Base(to), row: r, sidecar: true}})
+				to := rename.SidecarTarget(r.photo.Path, r.target, sc)
+				entries = append(entries, entry{rename.AbsPath(to), treeFile{name: filepath.Base(to), row: r, sidecar: true}})
 			}
 		}
 	}
@@ -85,7 +87,7 @@ func (m tuiModel) tree() *treeDir {
 		paths = append(paths, filepath.Dir(e.path))
 	}
 	for _, d := range m.removed {
-		paths = append(paths, filepath.Dir(absPath(d)))
+		paths = append(paths, filepath.Dir(rename.AbsPath(d)))
 	}
 	for i, p := range paths {
 		if i == 0 {
@@ -118,7 +120,7 @@ func (m tuiModel) tree() *treeDir {
 		d.files = append(d.files, e.file)
 	}
 	for _, r := range m.removed {
-		dir(absPath(r)).removed = true
+		dir(rename.AbsPath(r)).removed = true
 	}
 	return root
 }
@@ -316,14 +318,14 @@ func (m tuiModel) fileText(f treeFile, pad int) string {
 // renames planned: those of the arguments left empty, as a dry run
 // predicts them.
 func (m tuiModel) predictRemoved() []string {
-	moves := newPendingMoves()
+	moves := rename.NewPendingMoves()
 	for _, r := range m.rows {
 		if !r.usable() || r.same || r.target == "" {
 			continue
 		}
-		moves.add(r.photo.Path, r.target)
+		moves.Add(r.photo.Path, r.target)
 		for _, sc := range m.sidecars[r.photo.Path] {
-			moves.add(sc, sidecarTarget(r.photo.Path, r.target, sc))
+			moves.Add(sc, rename.SidecarTarget(r.photo.Path, r.target, sc))
 		}
 	}
 	var removed []string
@@ -331,7 +333,7 @@ func (m tuiModel) predictRemoved() []string {
 		if fi, err := os.Stat(arg); err != nil || !fi.IsDir() {
 			continue
 		}
-		if _, dirs, err := emptyDirs(arg, moves); err == nil {
+		if _, dirs, err := rename.EmptyDirs(arg, moves); err == nil {
 			removed = append(removed, dirs...)
 		}
 	}

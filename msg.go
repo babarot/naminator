@@ -3,6 +3,8 @@ package main
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/babarot/naminator/internal/photo"
 )
 
 // The work reports to the display (sender) with these messages. A run is
@@ -45,13 +47,13 @@ type exifResultMsg struct {
 	// image is the path the photo was read from; photo.Path is the one
 	// exiftool reports, which can be empty on an error.
 	image    string
-	photo    Photo
+	photo    photo.Photo
 	duration duration
 	err      error
 }
 
 type renameResultMsg struct {
-	photo  Photo
+	photo  photo.Photo
 	dryrun bool
 	err    error
 }

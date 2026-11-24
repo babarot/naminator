@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/babarot/naminator/internal/config"
+	"github.com/babarot/naminator/internal/photo"
+	"github.com/babarot/naminator/internal/rename"
+
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -35,17 +39,17 @@ func checkInteractive(opt Option) error {
 // --preset, or, when only files are given, the date and time in place (they
 // are renamed where they are, as naminator IMG_*.HEIC is meant to); else
 // the configuration's format, or the date and time in place.
-func startFormat(opt Option, cfg config, args []string) (string, error) {
+func startFormat(opt Option, cfg config.Config, args []string) (string, error) {
 	switch {
 	case opt.Format != "":
-		if _, err := parseTemplate(opt.Format); err != nil {
+		if _, err := rename.ParseTemplate(opt.Format); err != nil {
 			return "", fmt.Errorf("--format: %w", err)
 		}
 		return opt.Format, nil
 	case opt.Preset != "":
-		return cfg.findPreset(opt.Preset)
+		return cfg.FindPreset(opt.Preset)
 	}
-	inPlace := presets[0].format
+	inPlace := rename.Presets[0].Format
 	switch {
 	case onlyFiles(args):
 		return inPlace, nil
@@ -98,20 +102,20 @@ func (c CLI) runInteractive(tui tuiModel) error {
 // display, a program of its own drawn below the shell's prompt.
 func (c CLI) runDecided(m tuiModel) error {
 	d := m.decision()
-	tpl, err := parseTemplate(d.format)
+	tpl, err := rename.ParseTemplate(d.format)
 	if err != nil {
 		return err
 	}
-	c.namer = newNamer(tpl, c.args, c.opt.DestDir)
+	c.namer = rename.NewNamer(tpl, c.args, c.opt.DestDir)
 	// the photos go where the screen showed them going
 	c.planned = d.targets
 	c.logger.Debug("format chosen", "format", d.format)
 
 	// The photos given the file's time are among those of the screen
 	photos := m.photos()
-	sortByTime(photos)
+	photo.SortByTime(photos)
 	fmt.Println(Dim.Render("Format: ") + Blue.Render(m.base()) + d.format)
-	run := newModel(phaseStartMsg{kind: phaseRename, keys: pathsOf(photos), base: c.base, into: c.into, dry: c.opt.Dryrun}, c.cancel)
+	run := newModel(phaseStartMsg{kind: phaseRename, keys: photo.Paths(photos), base: c.base, into: c.into, dry: c.opt.Dryrun}, c.cancel)
 	if title := run.startCompact(); title != "" {
 		fmt.Println(title)
 	}

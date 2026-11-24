@@ -7,6 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/babarot/naminator/internal/photo"
+	"github.com/babarot/naminator/internal/rename"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -152,7 +155,7 @@ func (p *phase) apply(msg tea.Msg, now time.Time) (*item, *failure) {
 }
 
 // sidecarNote names the sidecars that went with a photo, as "  + xmp".
-func sidecarNote(photo Photo) string {
+func sidecarNote(photo photo.Photo) string {
 	var exts []string
 	for _, sc := range photo.RenamedSidecars {
 		exts = append(exts, strings.ToLower(strings.TrimPrefix(filepath.Ext(sc), ".")))
@@ -196,7 +199,7 @@ func (p *phase) cancel(now time.Time) {
 // from the home directory.
 func (p *phase) target(path string) string {
 	if p.base != "" {
-		if rel, err := filepath.Rel(absPath(p.base), absPath(path)); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		if rel, err := filepath.Rel(rename.AbsPath(p.base), rename.AbsPath(path)); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return rel
 		}
 	}
@@ -243,7 +246,7 @@ func (p *phase) title() string {
 			if p.into {
 				prep = "into"
 			}
-			where = fmt.Sprintf(" %s %s", prep, abbrevHome(absPath(p.base), os.Getenv("HOME")))
+			where = fmt.Sprintf(" %s %s", prep, abbrevHome(rename.AbsPath(p.base), os.Getenv("HOME")))
 		}
 		if p.dry {
 			return fmt.Sprintf("Planning %d %s%s (dry run)", n, plural(n, "rename", "renames"), where)

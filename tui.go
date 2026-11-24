@@ -6,11 +6,15 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
+
+	"github.com/babarot/naminator/internal/config"
+	"github.com/babarot/naminator/internal/photo"
+	"github.com/babarot/naminator/internal/rename"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/term"
@@ -43,7 +47,7 @@ type tuiDecision struct {
 	// failed are the photos whose EXIF data could not be read, to report,
 	// and fileTime those given the file's time instead, to rename too
 	failed   []failure
-	fileTime []Photo
+	fileTime []photo.Photo
 	// targets are the paths previewed, by photo path: the run gives them,
 	// so that the photos go where they were shown to go
 	targets map[string]string
@@ -66,7 +70,7 @@ func (v tuiView) String() string {
 // tuiRow is one photo of the list, in the order the photos were given.
 type tuiRow struct {
 	key   string // the path the photo was read from
-	photo Photo
+	photo photo.Photo
 	read  bool   // its EXIF data has come
 	err   string // reading it failed (no shooting time, ...)
 	// target is where it would go with the format, suffix the "_1" the
@@ -95,9 +99,9 @@ type tuiModel struct {
 	args    []string
 	destDir string
 	dry     bool
-	fs      FileSystem
+	fs      rename.FileSystem
 	cfgPath string
-	presets []preset
+	presets []rename.Preset
 	cancel  func()
 
 	rows   []*tuiRow
@@ -105,7 +109,7 @@ type tuiModel struct {
 	nRead  int
 	format string
 	cursor int // in runes of format
-	namer  *namer
+	namer  *rename.Namer
 	tplErr string
 	// sidecars are found once every photo is read
 	sidecars map[string][]string
@@ -134,7 +138,7 @@ type tuiModel struct {
 	result  tuiResult
 }
 
-func newTUIModel(args, images []string, format, destDir string, dry, clean bool, presets []preset, fsys FileSystem, cfgPath string, cancel func()) tuiModel {
+func newTUIModel(args, images []string, format, destDir string, dry, clean bool, presets []rename.Preset, fsys rename.FileSystem, cfgPath string, cancel func()) tuiModel {
 	width, height := 100, 30
 	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
 		width, height = w, h
@@ -169,26 +173,26 @@ func (m *tuiModel) setFormat(f string) {
 // plan gives each read photo its path with the format: in the order the
 // photos are taken, through a reserver, as the run will.
 func (m *tuiModel) plan() {
-	tpl, err := parseTemplate(m.format)
+	tpl, err := rename.ParseTemplate(m.format)
 	if err != nil {
 		m.tplErr, m.namer = err.Error(), nil
 		return
 	}
 	m.tplErr = ""
 	m.removed = nil
-	m.namer = newNamer(tpl, m.args, m.destDir)
-	var photos []Photo
+	m.namer = rename.NewNamer(tpl, m.args, m.destDir)
+	var photos []photo.Photo
 	for _, r := range m.rows {
 		if r.usable() {
 			photos = append(photos, r.photo)
 		}
 	}
-	sortByTime(photos)
-	reserver := newPathReserver()
+	photo.SortByTime(photos)
+	reserver := rename.NewReserver()
 	for _, p := range photos {
 		r := m.byKey[m.keyOf(p)]
-		want := m.namer.target(p)
-		r.target = reserver.reserve(m.fs, p.Path, want)
+		want := m.namer.Target(p)
+		r.target = reserver.Reserve(m.fs, p.Path, want)
 		r.same = r.target == p.Path
 		r.suffix = strings.TrimPrefix(strings.TrimSuffix(r.target, filepath.Ext(r.target)), strings.TrimSuffix(want, filepath.Ext(want)))
 	}
@@ -199,7 +203,7 @@ func (m *tuiModel) plan() {
 }
 
 // keyOf returns the row key of a photo read: the path it was read from.
-func (m tuiModel) keyOf(p Photo) string {
+func (m tuiModel) keyOf(p photo.Photo) string {
 	if _, ok := m.byKey[p.Path]; ok {
 		return p.Path
 	}
@@ -212,8 +216,8 @@ func (m tuiModel) keyOf(p Photo) string {
 }
 
 // photos returns the photos read with a shooting time, for the run.
-func (m tuiModel) photos() []Photo {
-	var out []Photo
+func (m tuiModel) photos() []photo.Photo {
+	var out []photo.Photo
 	for _, r := range m.rows {
 		if r.usable() {
 			out = append(out, r.photo)
@@ -255,7 +259,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.nRead++
 		if m.nRead == len(m.rows) {
-			m.sidecars, _ = findSidecars(m.fs, m.photos())
+			m.sidecars, _ = rename.FindSidecars(m.fs, m.photos())
 		}
 		m.plan()
 		return m, nil
@@ -437,7 +441,7 @@ func (m *tuiModel) toggleFileTime() {
 			return
 		}
 		r.fileTime = true
-		r.photo = Photo{
+		r.photo = photo.Photo{
 			Name:      filepath.Base(r.key),
 			Path:      r.key,
 			Dir:       filepath.Dir(r.key),
@@ -446,7 +450,7 @@ func (m *tuiModel) toggleFileTime() {
 		}
 	}
 	if m.nRead == len(m.rows) {
-		m.sidecars, _ = findSidecars(m.fs, m.photos())
+		m.sidecars, _ = rename.FindSidecars(m.fs, m.photos())
 	}
 	m.plan()
 }
@@ -492,7 +496,7 @@ func (m tuiModel) selected() *tuiRow {
 func (m *tuiModel) cyclePreset(next bool) {
 	i := -1
 	for j, p := range m.presets {
-		if p.format == m.format {
+		if p.Format == m.format {
 			i = j
 		}
 	}
@@ -504,14 +508,14 @@ func (m *tuiModel) cyclePreset(next bool) {
 	default:
 		i = (i + len(m.presets) - 1) % len(m.presets)
 	}
-	m.setFormat(m.presets[i].format)
+	m.setFormat(m.presets[i].Format)
 }
 
 // presetName names the format when it is a preset.
 func (m tuiModel) presetName() string {
 	for _, p := range m.presets {
-		if p.format == m.format {
-			return p.name
+		if p.Format == m.format {
+			return p.Name
 		}
 	}
 	return "custom"
@@ -521,9 +525,9 @@ func (m tuiModel) presetName() string {
 // "by date (-t)".
 func (m tuiModel) presetLabel() string {
 	name := m.presetName()
-	for _, p := range presets {
-		if p.name == name && p.flags != "" && p.format == m.format {
-			return name + " (" + p.flags + ")"
+	for _, p := range rename.Presets {
+		if p.Name == name && p.Flags != "" && p.Format == m.format {
+			return name + " (" + p.Flags + ")"
 		}
 	}
 	return name
@@ -535,41 +539,11 @@ func (m *tuiModel) save() {
 		m.notice = Red.Render("not saved: " + m.tplErr)
 		return
 	}
-	if err := saveFormat(m.cfgPath, m.format); err != nil {
+	if err := config.SaveFormat(m.cfgPath, m.format); err != nil {
 		m.notice = Red.Render("not saved: " + err.Error())
 		return
 	}
 	m.notice = Green.Render(iconSuccess) + Dim.Render(" saved as the format in "+abbrevHome(m.cfgPath, os.Getenv("HOME")))
-}
-
-// saveFormat sets format in the configuration file at path: it replaces
-// the line of format, or adds one at the top, and keeps the rest, comments
-// included.
-func saveFormat(path, format string) error {
-	b, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	line := "format: " + strconv.Quote(format)
-	lines := strings.Split(string(b), "\n")
-	done := false
-	for i, l := range lines {
-		if strings.HasPrefix(l, "format:") {
-			lines[i], done = line, true
-			break
-		}
-	}
-	if !done {
-		if len(b) == 0 {
-			lines = []string{line, ""}
-		} else {
-			lines = append([]string{line}, lines...)
-		}
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
 }
 
 // ================= view =================
@@ -724,9 +698,9 @@ func (m tuiModel) base() string {
 	}
 	p := r.photo
 	if !r.read {
-		p = Photo{Path: r.key, Dir: filepath.Dir(r.key)}
+		p = photo.Photo{Path: r.key, Dir: filepath.Dir(r.key)}
 	}
-	return m.shortDir(absPath(m.namer.output(p))) + "/"
+	return m.shortDir(rename.AbsPath(m.namer.Output(p))) + "/"
 }
 
 // shortDir shows dir from the home directory, and only its last two
@@ -757,7 +731,7 @@ func (m tuiModel) formatView() string {
 			end++
 		}
 		style := Red.Render
-		if end < len(runes) && slices.Contains(placeholders, string(runes[i+1:end])) {
+		if end < len(runes) && slices.Contains(rename.Placeholders, string(runes[i+1:end])) {
 			style = Magenta.Render
 		}
 		for j := i; j <= end && j < len(runes); j++ {
@@ -801,13 +775,13 @@ func (m tuiModel) partsLine() string {
 		return ""
 	}
 	dir := ""
-	if rel, err := filepath.Rel(m.namer.input(r.photo), r.photo.Dir); err == nil && rel != "." {
+	if rel, err := filepath.Rel(m.namer.Input(r.photo), r.photo.Dir); err == nil && rel != "." {
 		dir = rel
 	}
 	var b strings.Builder
 	b.WriteString(" ")
 	for _, k := range []string{"dir", "date", "time", "ext", "camera", "orig"} {
-		v := r.photo.value(k, dir)
+		v := rename.Value(r.photo, k, dir)
 		if v == "" {
 			v = "(none)"
 		}
@@ -1030,11 +1004,11 @@ func btoi(b bool) int {
 // for ~/Desktop/card), however they were given. A path outside it, such
 // as under -d, is written from the home directory.
 func (m tuiModel) shown(r *tuiRow, path string) string {
-	base := absPath(argParent(m.args, r.key))
-	if rel, err := filepath.Rel(base, absPath(path)); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	base := rename.AbsPath(rename.ArgParent(m.args, r.key))
+	if rel, err := filepath.Rel(base, rename.AbsPath(path)); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return rel
 	}
-	return abbrevHome(absPath(path), os.Getenv("HOME"))
+	return abbrevHome(rename.AbsPath(path), os.Getenv("HOME"))
 }
 
 // padRight pads s with spaces to width cells, or cuts it.
