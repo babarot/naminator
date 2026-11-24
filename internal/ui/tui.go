@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"github.com/babarot/naminator/internal/photo"
 	"github.com/babarot/naminator/internal/rename"
 	"github.com/babarot/naminator/internal/ui/keymap"
+	"github.com/babarot/naminator/internal/ui/theme"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -127,9 +127,9 @@ type tuiModel struct {
 	clean   bool
 	removed []string
 
-	// dark tells the terminal's background, for the color of the cursor's
-	// line
-	dark bool
+	// st are the styles, for a dark background until the terminal tells its
+	// own
+	st theme.Styles
 
 	insert  bool
 	confirm bool
@@ -148,13 +148,13 @@ func newTUIModel(args, images []string, format, destDir string, dry, clean bool,
 		width, height = w, h
 	}
 	m := tuiModel{
-		args: args, destDir: destDir, dry: dry, clean: clean, fs: fsys, cfgPath: cfgPath, presets: presets, cancel: cancel, keys: keymap.Default(),
+		args: args, destDir: destDir, dry: dry, clean: clean, fs: fsys, cfgPath: cfgPath, presets: presets, cancel: cancel, keys: keymap.Default(), st: theme.For(true),
 		byKey:    map[string]*tuiRow{},
 		folded:   map[string]bool{},
 		expanded: map[string]bool{},
 		width:    width,
 		height:   height,
-		spinner:  spinner.New(spinner.WithSpinner(spinner.Jump), spinner.WithStyle(Cyan)),
+		spinner:  spinner.New(spinner.WithSpinner(spinner.Jump), spinner.WithStyle(theme.For(true).Active)),
 	}
 	for _, img := range images {
 		r := &tuiRow{key: img}
@@ -165,7 +165,7 @@ func newTUIModel(args, images []string, format, destDir string, dry, clean bool,
 	return m
 }
 
-func (m tuiModel) Init() tea.Cmd { return m.spinner.Tick }
+func (m tuiModel) Init() tea.Cmd { return tea.Batch(m.spinner.Tick, tea.RequestBackgroundColor) }
 
 // setFormat sets the format, puts the cursor at its end, and plans again.
 func (m *tuiModel) setFormat(f string) {
@@ -250,6 +250,11 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		return m, nil
+
+	case tea.BackgroundColorMsg:
+		m.st = theme.For(msg.IsDark())
+		m.spinner.Style = m.st.Active
 		return m, nil
 
 	case exifResultMsg:
@@ -466,7 +471,7 @@ func (m *tuiModel) toggleFileTime() {
 	} else {
 		fi, err := os.Stat(r.key)
 		if err != nil {
-			m.notice = Red.Render("no file time: " + err.Error())
+			m.notice = m.st.Failure.Render("no file time: " + err.Error())
 			return
 		}
 		r.fileTime = true
@@ -565,14 +570,14 @@ func (m tuiModel) presetLabel() string {
 // save writes the format to the configuration file as its format.
 func (m *tuiModel) save() {
 	if m.tplErr != "" {
-		m.notice = Red.Render("not saved: " + m.tplErr)
+		m.notice = m.st.Failure.Render("not saved: " + m.tplErr)
 		return
 	}
 	if err := config.SaveFormat(m.cfgPath, m.format); err != nil {
-		m.notice = Red.Render("not saved: " + err.Error())
+		m.notice = m.st.Failure.Render("not saved: " + err.Error())
 		return
 	}
-	m.notice = Green.Render(iconSuccess) + Dim.Render(" saved as the format in "+abbrevHome(m.cfgPath, os.Getenv("HOME")))
+	m.notice = m.st.Success.Render(iconSuccess) + m.st.Dim.Render(" saved as the format in "+abbrevHome(m.cfgPath, os.Getenv("HOME")))
 }
 
 // ================= view =================
@@ -597,27 +602,9 @@ func (m tuiModel) tooLow() bool {
 	return m.height > 0 && m.height < minHeight
 }
 
-// resetSGR matches the resets of the styles, after which the background of
-// the cursor's line is set again.
-var resetSGR = regexp.MustCompile(`\x1b\[0?m`)
-
-// highlight draws line, padded to width, on the background of the cursor's
-// line: lighter than the terminal's, and lighter still in insert mode,
-// where the keys go to the format.
+// highlight draws line, over width, as the cursor's.
 func (m tuiModel) highlight(line string, width int) string {
-	color := "40;52;87" // #283457
-	editing := m.uiState() == stateEdit
-	switch {
-	case m.dark && editing:
-		color = "34;36;54" // #222436
-	case !m.dark && editing:
-		color = "238;241;251" // #eef1fb
-	case !m.dark:
-		color = "219;228;255" // #dbe4ff
-	}
-	bg := "\x1b[48;2;" + color + "m"
-	line = resetSGR.ReplaceAllStringFunc(line, func(r string) string { return r + bg })
-	return bg + padRight(line, width) + "\x1b[49m"
+	return m.st.CursorLine(padRight(line, width), m.uiState() == stateEdit)
 }
 
 // View draws the screen on the alternate screen, which is left when the
@@ -645,26 +632,26 @@ func (m tuiModel) lines(now time.Time) []string {
 	editing := m.uiState() == stateEdit
 	var lines []string
 	// the header
-	left := " " + Bold.Render("naminator") + "  " + fmt.Sprintf("%d %s in %s", len(m.rows), plural(len(m.rows), "photo", "photos"), m.where())
-	right := Dim.Render("view: " + m.view.String() + " ")
+	left := " " + m.st.Strong.Render("naminator") + "  " + fmt.Sprintf("%d %s in %s", len(m.rows), plural(len(m.rows), "photo", "photos"), m.where())
+	right := m.st.Dim.Render("view: " + m.view.String() + " ")
 	if m.nRead < len(m.rows) {
-		right = m.spinner.View() + Dim.Render(fmt.Sprintf(" reading EXIF %d/%d ", m.nRead, len(m.rows)))
+		right = m.spinner.View() + m.st.Dim.Render(fmt.Sprintf(" reading EXIF %d/%d ", m.nRead, len(m.rows)))
 	}
 	lines = append(lines, spread(left, right, w))
 
 	// the format, after the directory it starts from
-	border := Dim
+	border := m.st.Dim
 	if editing {
-		border = Magenta
+		border = m.st.Part
 	}
 	inner := w - 2
-	title := Bold.Render("Format")
+	title := m.st.Strong.Render("Format")
 	if editing {
-		title = Magenta.Bold(true).Render("Format")
+		title = m.st.PartStrong.Render("Format")
 	}
 	lines = append(lines, border.Render("╭─ ")+title+border.Render(" "+strings.Repeat("─", max(0, inner-9))+"╮"))
-	boxRight := Dim.Render(m.boxHint()+m.boxTail()) + " "
-	boxLeft := " " + Blue.Render(m.base()) + m.formatView()
+	boxRight := m.st.Dim.Render(m.boxHint()+m.boxTail()) + " "
+	boxLeft := " " + m.st.Path.Render(m.base()) + m.formatView()
 	// a long format is cut rather than the hint on the right
 	if room := inner - ansi.StringWidth(boxRight) - 1; ansi.StringWidth(boxLeft) > room {
 		boxLeft = ansi.Truncate(boxLeft, max(room, 1), iconEllipsis)
@@ -675,7 +662,7 @@ func (m tuiModel) lines(now time.Time) []string {
 
 	// the parts of the selected photo, or what is wrong with the format
 	if m.tplErr != "" {
-		lines = append(lines, fitLine("  "+Red.Render(iconError+" "+m.tplErr), w))
+		lines = append(lines, fitLine("  "+m.st.Failure.Render(iconError+" "+m.tplErr), w))
 	} else {
 		lines = append(lines, fitLine(m.partsLine(), w))
 	}
@@ -684,17 +671,17 @@ func (m tuiModel) lines(now time.Time) []string {
 	items := m.items()
 	win := m.window()
 	if win.up {
-		lines = append(lines, fitLine("     "+Dim.Render(fmt.Sprintf("↑ %d more  (%s)", win.top, m.keys.Hint(keymap.List, keymap.PageUp))), w))
+		lines = append(lines, fitLine("     "+m.st.Dim.Render(fmt.Sprintf("↑ %d more  (%s)", win.top, m.keys.Hint(keymap.List, keymap.PageUp))), w))
 	}
 	for j := win.top; j < win.top+win.rows; j++ {
-		if j == m.sel && styled {
+		if j == m.sel && !m.st.Plain {
 			lines = append(lines, m.highlight(fitLine(items[j].draw(false), w), w))
 		} else {
 			lines = append(lines, fitLine(items[j].draw(j == m.sel), w))
 		}
 	}
 	if win.down {
-		lines = append(lines, fitLine("     "+Dim.Render(fmt.Sprintf("↓ %d more  (%s)", len(items)-win.top-win.rows, m.keys.Hint(keymap.List, keymap.PageDown))), w))
+		lines = append(lines, fitLine("     "+m.st.Dim.Render(fmt.Sprintf("↓ %d more  (%s)", len(items)-win.top-win.rows, m.keys.Hint(keymap.List, keymap.PageDown))), w))
 	}
 	// the counts and the keys stay at the bottom of the screen
 	for range m.listHeight() - win.rows - btoi(win.up) - btoi(win.down) {
@@ -754,7 +741,7 @@ func (m tuiModel) formatView() string {
 	styles := make([]func(...string) string, len(runes))
 	for i := 0; i < len(runes); {
 		if runes[i] != '{' {
-			styles[i] = Bold.Render
+			styles[i] = m.st.Strong.Render
 			i++
 			continue
 		}
@@ -762,9 +749,9 @@ func (m tuiModel) formatView() string {
 		for end < len(runes) && runes[end] != '}' {
 			end++
 		}
-		style := Red.Render
+		style := m.st.Failure.Render
 		if end < len(runes) && slices.Contains(rename.Placeholders, string(runes[i+1:end])) {
-			style = Magenta.Render
+			style = m.st.Part.Render
 		}
 		for j := i; j <= end && j < len(runes); j++ {
 			styles[j] = style
@@ -798,11 +785,11 @@ func (m tuiModel) partsLine() string {
 	r := m.selected()
 	switch {
 	case r == nil:
-		return "  " + Dim.Render(fmt.Sprintf("a directory: %s folds it, %s opens it", m.keys.Hint(keymap.List, keymap.Fold), m.keys.Hint(keymap.List, keymap.Unfold)))
+		return "  " + m.st.Dim.Render(fmt.Sprintf("a directory: %s folds it, %s opens it", m.keys.Hint(keymap.List, keymap.Fold), m.keys.Hint(keymap.List, keymap.Unfold)))
 	case !r.read:
-		return "  " + Dim.Render("reading EXIF of the selected photo…")
+		return "  " + m.st.Dim.Render("reading EXIF of the selected photo…")
 	case r.skipped():
-		return "  " + Dim.Render(fmt.Sprintf("no shooting time in its EXIF: it is skipped (%s uses the file's time)", m.keys.Hint(keymap.List, keymap.FileTime)))
+		return "  " + m.st.Dim.Render(fmt.Sprintf("no shooting time in its EXIF: it is skipped (%s uses the file's time)", m.keys.Hint(keymap.List, keymap.FileTime)))
 	case m.namer == nil:
 		return ""
 	}
@@ -817,7 +804,7 @@ func (m tuiModel) partsLine() string {
 		if v == "" {
 			v = "(none)"
 		}
-		b.WriteString(" " + Magenta.Render("{"+k+"}") + " " + Dim.Render(v) + " ")
+		b.WriteString(" " + m.st.Part.Render("{"+k+"}") + " " + m.st.Dim.Render(v) + " ")
 	}
 	return b.String()
 }
@@ -826,23 +813,23 @@ func (m tuiModel) partsLine() string {
 func (m tuiModel) row(r *tuiRow, selected bool, fromW int) string {
 	lead := "  "
 	if selected {
-		lead = Cyan.Render(">") + " "
+		lead = m.st.Active.Render(">") + " "
 	}
 	from := padName(m.shown(r, r.key), fromW)
 	switch {
 	case !r.read:
-		return lead + Dim.Render(iconQueued) + " " + Dim.Render(from) + "  " + Dim.Render("reading EXIF…")
+		return lead + m.st.Dim.Render(iconQueued) + " " + m.st.Dim.Render(from) + "  " + m.st.Dim.Render("reading EXIF…")
 	case r.skipped():
-		return lead + Red.Render(iconError) + " " + from + "  " + Dim.Render("no shooting time; skipped")
+		return lead + m.st.Failure.Render(iconError) + " " + from + "  " + m.st.Dim.Render("no shooting time; skipped")
 	case m.namer == nil:
-		return lead + Dim.Render(iconQueued) + " " + from + "  " + Dim.Render("→ ?")
+		return lead + m.st.Dim.Render(iconQueued) + " " + from + "  " + m.st.Dim.Render("→ ?")
 	case r.same:
-		return lead + Green.Render(iconSuccess) + " " + Dim.Render(from) + "  " + Dim.Render("already named")
+		return lead + m.st.Success.Render(iconSuccess) + " " + m.st.Dim.Render(from) + "  " + m.st.Dim.Render("already named")
 	}
 	to := m.shown(r, r.target)
 	if r.suffix != "" {
 		base := strings.TrimSuffix(to, filepath.Ext(to))
-		to = strings.TrimSuffix(base, r.suffix) + Yellow.Render(r.suffix) + filepath.Ext(to)
+		to = strings.TrimSuffix(base, r.suffix) + m.st.Warn.Render(r.suffix) + filepath.Ext(to)
 	}
 	note := ""
 	if scs := m.sidecars[r.photo.Path]; len(scs) > 0 {
@@ -850,20 +837,20 @@ func (m tuiModel) row(r *tuiRow, selected bool, fromW int) string {
 		for _, sc := range scs {
 			exts = append(exts, strings.ToLower(strings.TrimPrefix(filepath.Ext(sc), ".")))
 		}
-		note = Dim.Render("  + " + strings.Join(exts, " "))
+		note = m.st.Dim.Render("  + " + strings.Join(exts, " "))
 	}
-	mark := Yellow.Render(iconChange)
+	mark := m.st.Warn.Render(iconChange)
 	if r.fileTime {
-		mark = Yellow.Render(iconFileTime)
-		note += Dim.Render("  (file time)")
+		mark = m.st.Warn.Render(iconFileTime)
+		note += m.st.Dim.Render("  (file time)")
 	}
-	return lead + mark + " " + from + "  " + Dim.Render("→") + " " + to + note
+	return lead + mark + " " + from + "  " + m.st.Dim.Render("→") + " " + to + note
 }
 
 // countLine counts what the photos would get.
 func (m tuiModel) countLine() string {
 	if m.tplErr != "" {
-		return "  " + Red.Render("fix the format to see the new paths")
+		return "  " + m.st.Failure.Render("fix the format to see the new paths")
 	}
 	var rename, same, numbered, failed, reading int
 	for _, r := range m.rows {
@@ -883,25 +870,25 @@ func (m tuiModel) countLine() string {
 	}
 	var parts []string
 	if reading > 0 {
-		parts = append(parts, Dim.Render(fmt.Sprintf("%d reading", reading)))
+		parts = append(parts, m.st.Dim.Render(fmt.Sprintf("%d reading", reading)))
 	}
 	parts = append(parts, fmt.Sprintf("%d to rename", rename))
 	if same > 0 {
-		parts = append(parts, Dim.Render(fmt.Sprintf("%d already named", same)))
+		parts = append(parts, m.st.Dim.Render(fmt.Sprintf("%d already named", same)))
 	}
 	if numbered > 0 {
-		parts = append(parts, Yellow.Render(fmt.Sprintf("%d numbered", numbered)))
+		parts = append(parts, m.st.Warn.Render(fmt.Sprintf("%d numbered", numbered)))
 	}
 	if failed > 0 {
-		parts = append(parts, Red.Render(fmt.Sprintf("%d without a shooting time", failed)))
+		parts = append(parts, m.st.Failure.Render(fmt.Sprintf("%d without a shooting time", failed)))
 	}
 	if n := m.countFileTime(); n > 0 {
-		parts = append(parts, Yellow.Render(fmt.Sprintf("%d by file time", n)))
+		parts = append(parts, m.st.Warn.Render(fmt.Sprintf("%d by file time", n)))
 	}
 	if n := len(m.removed); n > 0 {
-		parts = append(parts, Dim.Render(fmt.Sprintf("%d %s removed", n, plural(n, "directory", "directories"))))
+		parts = append(parts, m.st.Dim.Render(fmt.Sprintf("%d %s removed", n, plural(n, "directory", "directories"))))
 	}
-	return "  " + joinDim(parts)
+	return "  " + joinDim(m.st, parts)
 }
 
 // countMoves counts the photos that get another path.
@@ -934,7 +921,7 @@ func (m tuiModel) help() string {
 	if m.uiState() == stateConfirm {
 		return m.confirmHelp()
 	}
-	return keyLine(m.hints(), m.width-2)
+	return m.keyLine(m.hints(), m.width-2)
 }
 
 // confirmHelp asks whether to rename.
@@ -944,7 +931,7 @@ func (m tuiModel) confirmHelp() string {
 	if m.dry {
 		what = fmt.Sprintf("Try renaming %d %s (dry run)?", n, plural(n, "photo", "photos"))
 	}
-	return Yellow.Render(what) + " " + Bold.Render(m.keys.Hint(keymap.Confirm, keymap.Yes)) + Dim.Render("/") + Bold.Render("N")
+	return m.st.Warn.Render(what) + " " + m.st.Strong.Render(m.keys.Hint(keymap.Confirm, keymap.Yes)) + m.st.Dim.Render("/") + m.st.Strong.Render("N")
 }
 
 // hint is a key of the key line and what it does.
@@ -1002,16 +989,16 @@ func (m tuiModel) hints() []hint {
 
 // keyLine draws hints in width, leaving out from the end those that do not
 // fit and need not stay.
-func keyLine(hints []hint, width int) string {
+func (m tuiModel) keyLine(hints []hint, width int) string {
 	draw := func() string {
 		keys := make([]string, len(hints))
 		for i, h := range hints {
-			keys[i] = h.key + Dim.Render(" "+h.what)
+			keys[i] = h.key + m.st.Dim.Render(" "+h.what)
 			if h.off {
-				keys[i] = Dim.Render(h.key + " " + h.what)
+				keys[i] = m.st.Dim.Render(h.key + " " + h.what)
 			}
 		}
-		return strings.Join(keys, Dim.Render(" • "))
+		return strings.Join(keys, m.st.Dim.Render(" • "))
 	}
 	for ansi.StringWidth(draw()) > width {
 		i := len(hints) - 1

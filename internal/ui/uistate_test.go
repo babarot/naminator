@@ -1,11 +1,14 @@
 package ui
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/babarot/naminator/internal/ui/theme"
 )
 
 // states has a screen in each state.
@@ -122,6 +125,21 @@ func TestMouseInEveryState(t *testing.T) {
 	for s, m := range states(t) {
 		if got, want := m.View().MouseMode == tea.MouseModeCellMotion, s.takesMouse(); got != want {
 			t.Errorf("state %q: mouse %v, want %v", s, got, want)
+		}
+	}
+}
+
+// The styles suit the terminal's background once it tells.
+func TestBackgroundColor(t *testing.T) {
+	goldenRoot(t)
+	m := newMouseTUI(t, 3)
+	for _, tt := range []struct {
+		bg   color.Color
+		dark bool
+	}{{color.White, false}, {color.Black, true}} {
+		m = m.send(t, tea.BackgroundColorMsg{Color: tt.bg})
+		if got, want := m.st.CursorLine("x", false), theme.For(tt.dark).CursorLine("x", false); got != want {
+			t.Errorf("dark %v: %q, want %q", tt.dark, got, want)
 		}
 	}
 }

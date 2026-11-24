@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/babarot/naminator/internal/rename"
+	"github.com/babarot/naminator/internal/ui/theme"
 )
 
 // The tree view of the interactive screen: the directories as they will be
@@ -152,17 +153,17 @@ func (d *treeDir) counts() (total, numbered, check int) {
 	return total, numbered, check
 }
 
-func (d *treeDir) countText() string {
+func (d *treeDir) countText(st theme.Styles) string {
 	if d.removed && len(d.files) == 0 && len(d.dirs) == 0 {
-		return Dim.Render("  (removed by -c)")
+		return st.Dim.Render("  (removed by -c)")
 	}
 	total, numbered, check := d.counts()
-	s := Dim.Render(fmt.Sprintf("  %d", total))
+	s := st.Dim.Render(fmt.Sprintf("  %d", total))
 	if numbered > 0 {
-		s += Dim.Render(" · ") + Yellow.Render(fmt.Sprintf("%d numbered", numbered))
+		s += st.Dim.Render(" · ") + st.Warn.Render(fmt.Sprintf("%d numbered", numbered))
 	}
 	if check > 0 {
-		s += Dim.Render(" · ") + Red.Render(fmt.Sprintf("%d to check", check))
+		s += st.Dim.Render(" · ") + st.Failure.Render(fmt.Sprintf("%d to check", check))
 	}
 	return s
 }
@@ -172,7 +173,7 @@ func (m tuiModel) treeItems() []tuiItem {
 	root := m.tree()
 	lead := func(selected bool) string {
 		if selected {
-			return Cyan.Render(">") + " "
+			return m.st.Active.Render(">") + " "
 		}
 		return "  "
 	}
@@ -185,7 +186,7 @@ func (m tuiModel) treeItems() []tuiItem {
 	arrowCol := 0
 	arrowAt := &arrowCol
 	items := []tuiItem{{kind: itemRoot, path: root.path, draw: func(sel bool) string {
-		return lead(sel) + Dim.Render(rootMark) + Blue.Render(root.name+"/") + root.countText()
+		return lead(sel) + m.st.Dim.Render(rootMark) + m.st.Path.Render(root.name+"/") + root.countText(m.st)
 	}}}
 	var walk func(d *treeDir, prefix string)
 	walk = func(d *treeDir, prefix string) {
@@ -249,9 +250,9 @@ func (m tuiModel) treeItems() []tuiItem {
 				empty := sub.removed && len(sub.files) == 0 && len(sub.dirs) == 0
 				items = append(items, tuiItem{kind: itemDir, path: sub.path, draw: func(sel bool) string {
 					if empty {
-						return lead(sel) + Dim.Render(prefix+branch+"  "+sub.name+"/") + sub.countText()
+						return lead(sel) + m.st.Dim.Render(prefix+branch+"  "+sub.name+"/") + sub.countText(m.st)
 					}
-					return lead(sel) + Dim.Render(prefix+branch+mark) + Blue.Render(sub.name+"/") + sub.countText()
+					return lead(sel) + m.st.Dim.Render(prefix+branch+mark) + m.st.Path.Render(sub.name+"/") + sub.countText(m.st)
 				}})
 				if !folded {
 					walk(sub, next)
@@ -259,7 +260,7 @@ func (m tuiModel) treeItems() []tuiItem {
 			case l.more > 0:
 				n := l.more
 				items = append(items, tuiItem{kind: itemMore, path: d.path, draw: func(sel bool) string {
-					return lead(sel) + Dim.Render(prefix+branch) + Dim.Render(fmt.Sprintf("⋯ %d more files", n))
+					return lead(sel) + m.st.Dim.Render(prefix+branch) + m.st.Dim.Render(fmt.Sprintf("⋯ %d more files", n))
 				}})
 			default:
 				f := *l.file
@@ -268,7 +269,7 @@ func (m tuiModel) treeItems() []tuiItem {
 					arrowCol = max(arrowCol, min(w, maxArrowCol))
 				}
 				items = append(items, tuiItem{kind: itemFile, row: f.row, path: d.path, draw: func(sel bool) string {
-					return lead(sel) + Dim.Render(prefix+branch) + m.fileText(f, *arrowAt-w)
+					return lead(sel) + m.st.Dim.Render(prefix+branch) + m.fileText(f, *arrowAt-w)
 				}})
 			}
 		}
@@ -296,20 +297,20 @@ func (m tuiModel) fileText(f treeFile, pad int) string {
 	r := f.row
 	switch {
 	case f.sidecar:
-		return Dim.Render(f.name)
+		return m.st.Dim.Render(f.name)
 	case !r.read:
-		return Dim.Render(f.name + "  (reading EXIF…)")
+		return m.st.Dim.Render(f.name + "  (reading EXIF…)")
 	case r.skipped():
-		return Red.Render(f.name) + Dim.Render("  (no shooting time)")
+		return m.st.Failure.Render(f.name) + m.st.Dim.Render("  (no shooting time)")
 	case r.same || m.tplErr != "":
-		return Dim.Render(f.name + "  (already named)")
+		return m.st.Dim.Render(f.name + "  (already named)")
 	}
-	s := f.name + strings.Repeat(" ", max(0, pad)) + Dim.Render("  ← "+m.shown(r, r.key))
+	s := f.name + strings.Repeat(" ", max(0, pad)) + m.st.Dim.Render("  ← "+m.shown(r, r.key))
 	if r.suffix != "" {
-		s += "  " + Yellow.Render(r.suffix)
+		s += "  " + m.st.Warn.Render(r.suffix)
 	}
 	if r.fileTime {
-		s += "  " + Yellow.Render(iconFileTime) + Dim.Render(" file time")
+		s += "  " + m.st.Warn.Render(iconFileTime) + m.st.Dim.Render(" file time")
 	}
 	return s
 }

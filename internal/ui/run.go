@@ -43,7 +43,6 @@ type Run struct {
 // NewPlainRun returns the display of a run without a terminal: plain lines
 // written to w.
 func NewPlainRun(w io.Writer, first Phase) *Run {
-	disableStyles()
 	return &Run{Tracker: Tracker{newPlainSender(w, first.msg)}}
 }
 

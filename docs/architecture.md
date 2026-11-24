@@ -9,7 +9,8 @@ The packages are layered: a package imports only from lower layers, and only the
 | 1 | `internal/rename` | Where photos go: templates, paths no two photos share, sidecars, and the directories left empty | `internal/photo` | - |
 | 2 | `internal/config` | The configuration file | `internal/rename` | `github.com/goccy/go-yaml` |
 | 3 | `internal/ui/keymap` | Keys bound to actions by name | - | - |
-| 4 | `internal/ui` | The interactive screen and the display of a run | `internal/config`, `internal/photo`, `internal/rename`, `internal/ui/keymap` | `charm.land/bubbles/v2`, `charm.land/bubbletea/v2`, `charm.land/lipgloss/v2`, `github.com/charmbracelet/x/ansi`, `github.com/mattn/go-isatty`, `golang.org/x/sys`, `golang.org/x/term` |
+| 3 | `internal/ui/theme` | The colors, by what they are for, and their styles | - | `charm.land/lipgloss/v2` |
+| 4 | `internal/ui` | The interactive screen and the display of a run | `internal/config`, `internal/photo`, `internal/rename`, `internal/ui/keymap`, `internal/ui/theme` | `charm.land/bubbles/v2`, `charm.land/bubbletea/v2`, `github.com/charmbracelet/x/ansi`, `github.com/mattn/go-isatty`, `golang.org/x/sys`, `golang.org/x/term` |
 | 5 | `internal/cli` | The command line: the flags, the workers, and moving the files | `internal/config`, `internal/photo`, `internal/rename`, `internal/ui` | `github.com/jessevdk/go-flags`, `github.com/mattn/go-isatty`, `github.com/nxadm/tail` |
 | 6 | `main` | Calls cli.Main with the version | `internal/cli` | - |
 <!-- layers:end -->
