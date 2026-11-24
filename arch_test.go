@@ -25,9 +25,10 @@ var layers = []layer{
 	{"internal/photo", 0, nil, []string{"github.com/barasher/go-exiftool", "github.com/gabriel-vasile/mimetype"}, "Photos: their EXIF data, read with exiftool, and the files that are photos"},
 	{"internal/rename", 1, []string{"internal/photo"}, nil, "Where photos go: templates, paths no two photos share, sidecars, and the directories left empty"},
 	{"internal/config", 2, []string{"internal/rename"}, []string{"github.com/goccy/go-yaml"}, "The configuration file"},
-	{"internal/ui", 3, []string{"internal/config", "internal/photo", "internal/rename"}, []string{"charm.land/bubbles/v2", "charm.land/bubbletea/v2", "charm.land/lipgloss/v2", "github.com/charmbracelet/x/ansi", "github.com/mattn/go-isatty", "golang.org/x/sys", "golang.org/x/term"}, "The interactive screen and the display of a run"},
-	{"internal/cli", 4, []string{"internal/config", "internal/photo", "internal/rename", "internal/ui"}, []string{"github.com/jessevdk/go-flags", "github.com/mattn/go-isatty", "github.com/nxadm/tail"}, "The command line: the flags, the workers, and moving the files"},
-	{"", 5, []string{"internal/cli"}, nil, "Calls cli.Main with the version"},
+	{"internal/ui/keymap", 3, nil, nil, "Keys bound to actions by name"},
+	{"internal/ui", 4, []string{"internal/config", "internal/photo", "internal/rename", "internal/ui/keymap"}, []string{"charm.land/bubbles/v2", "charm.land/bubbletea/v2", "charm.land/lipgloss/v2", "github.com/charmbracelet/x/ansi", "github.com/mattn/go-isatty", "golang.org/x/sys", "golang.org/x/term"}, "The interactive screen and the display of a run"},
+	{"internal/cli", 5, []string{"internal/config", "internal/photo", "internal/rename", "internal/ui"}, []string{"github.com/jessevdk/go-flags", "github.com/mattn/go-isatty", "github.com/nxadm/tail"}, "The command line: the flags, the workers, and moving the files"},
+	{"", 6, []string{"internal/cli"}, nil, "Calls cli.Main with the version"},
 }
 
 // layer is a package's place: its layer, the packages of this module

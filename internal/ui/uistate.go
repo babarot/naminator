@@ -1,5 +1,7 @@
 package ui
 
+import "github.com/babarot/naminator/internal/ui/keymap"
+
 // uiState is what the interactive screen is in, read from the fields that
 // hold it, in the order keys are given out: what is asked or edited, then
 // the list. Keys, the mouse, what is drawn and the key line go by it, and
@@ -40,3 +42,18 @@ func (m tuiModel) uiState() uiState {
 // takesMouse reports whether the mouse does something: while nothing is
 // asked, and the screen is drawn.
 func (s uiState) takesMouse() bool { return s != stateConfirm && s != stateTooLow }
+
+// scopes are where the keys of the state are read.
+func (s uiState) scopes() []keymap.Scope {
+	switch s {
+	case stateList, stateTree:
+		return []keymap.Scope{keymap.Anywhere, keymap.Screen, keymap.List}
+	case stateEdit:
+		return []keymap.Scope{keymap.Anywhere, keymap.Screen, keymap.Editing}
+	case stateConfirm:
+		return []keymap.Scope{keymap.Anywhere, keymap.Confirm}
+	case stateTooLow:
+		return []keymap.Scope{keymap.Anywhere, keymap.TooLow}
+	}
+	return []keymap.Scope{keymap.Anywhere}
+}

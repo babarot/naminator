@@ -8,6 +8,8 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"
+
+	"github.com/babarot/naminator/internal/ui/keymap"
 )
 
 // model draws the run in the terminal, after gh-infra's spinner display. A
@@ -149,7 +151,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.flush()
 
 	case tea.KeyPressMsg:
-		if msg.String() == "ctrl+c" {
+		if keymap.Default().Action(msg.String(), keymap.Anywhere) == keymap.Interrupt {
 			return m, m.stop()
 		}
 		return m, nil
