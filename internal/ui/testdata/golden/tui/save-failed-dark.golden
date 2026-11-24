@@ -1,0 +1,83 @@
+-- screen --
+ naminator  6 photos in card                                                             view: list
+╭─ Format ─────────────────────────────────────────────────────────────────────────────────────────╮
+│ ~/{dir}/{date}_{time}                                               i edit  date and time  tab › │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  {dir} card  {date} 2026-10-04  {time} 14-22-00  {ext} jpg  {camera} unknown  {orig} DSC00000
+  ~ card/DSC00000.JPG  → card/2026-10-04_14-22-00.jpg                                               
+  ~ card/DSC00001.JPG  → card/2026-10-04_14-22-01.jpg
+  ~ card/DSC00002.JPG  → card/2026-10-04_14-22-01_1.jpg
+  ~ card/DSC00003.JPG  → card/2026-10-04_14-22-03.jpg
+  ~ card/DSC00004.JPG  → card/2026-10-04_14-22-04.jpg
+  ~ card/DSC00005.JPG  → card/2026-10-04_14-22-05.jpg
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  6 to rename · 1 numbered
+  not saved: permission denied
+  i edit format • tab preset • j/k move • v tree • enter rename… • ctrl+s save • q quit
+-- styles --
+L1 1-10 bold
+L1 89-99 faint
+L2 0-2 faint
+L2 3-9 bold
+L2 10-100 faint
+L3 0-1 faint
+L3 2-4 fg=c4
+L3 4-9 fg=c5
+L3 9-10 bold
+L3 10-16 fg=c5
+L3 16-17 bold
+L3 17-23 fg=c5
+L3 70-100 faint
+L4 0-100 faint
+L5 2-7 fg=c5
+L5 8-12 faint
+L5 14-20 fg=c5
+L5 21-31 faint
+L5 33-39 fg=c5
+L5 40-48 faint
+L5 50-55 fg=c5
+L5 56-59 faint
+L5 61-69 fg=c5
+L5 70-77 faint
+L5 79-85 fg=c5
+L5 86-94 faint
+L6 0-4 fg=c3 bg=#283457
+L6 4-23 bg=#283457
+L6 23-25 bg=#283457 faint
+L6 25-100 bg=#283457
+L7 2-3 fg=c3
+L7 23-24 faint
+L8 2-3 fg=c3
+L8 23-24 faint
+L8 49-51 fg=c3
+L9 2-3 fg=c3
+L9 23-24 faint
+L10 2-3 fg=c3
+L10 23-24 faint
+L11 2-3 fg=c3
+L11 23-24 faint
+L28 14-15 faint
+L28 16-26 fg=c3
+L29 2-30 fg=c1
+L30 4-17 faint
+L30 22-30 faint
+L30 35-41 faint
+L30 44-50 faint
+L30 57-66 faint
+L30 74-80 faint
+L30 83-87 faint

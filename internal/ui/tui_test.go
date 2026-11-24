@@ -105,7 +105,7 @@ func TestTUIPlan(t *testing.T) {
 	}
 	// a format that cannot be used stops the plan, with what to fix
 	m.setFormat("{date}/{nope}")
-	if m.tplErr == "" || !strings.Contains(strings.Join(m.lines(time.Now()), "\n"), "unknown placeholder {nope}") {
+	if m.tplErr == "" || !strings.Contains(strings.Join(m.lines(), "\n"), "unknown placeholder {nope}") {
 		t.Errorf("tplErr = %q", m.tplErr)
 	}
 	m.setFormat("{ext}/{date}/{date}_{time}")
@@ -236,7 +236,7 @@ func TestTUIView(t *testing.T) {
 		}{{false, viewList}, {true, viewList}, {false, viewTree}} {
 			m.insert, m.view = mode.insert, mode.view
 			insert := mode.insert
-			lines := m.lines(time.Now())
+			lines := m.lines()
 			if len(lines) != size[1] {
 				t.Errorf("%v insert=%v: %d lines", size, insert, len(lines))
 			}
@@ -509,7 +509,7 @@ func click(m tuiModel, x, y int) tea.Msg {
 // find returns the line and column where s is drawn on the screen.
 func find(t *testing.T, m tuiModel, s string) (x, y int) {
 	t.Helper()
-	for i, l := range m.lines(time.Now()) {
+	for i, l := range m.lines() {
 		plain := ansi.Strip(l)
 		if before, _, ok := strings.Cut(plain, s); ok {
 			return ansi.StringWidth(before), i
@@ -706,7 +706,7 @@ func TestTUIPage(t *testing.T) {
 func TestTUIMoreLines(t *testing.T) {
 	m := newMouseTUI(t, 60)
 	n := m.listHeight()
-	text := func() string { return ansi.Strip(strings.Join(m.lines(time.Now()), "\n")) }
+	text := func() string { return ansi.Strip(strings.Join(m.lines(), "\n")) }
 	if !strings.Contains(text(), fmt.Sprintf("↓ %d more", 60-(n-1))) || strings.Contains(text(), "↑") {
 		t.Fatalf("at the top:\n%s", text())
 	}
@@ -729,7 +729,7 @@ func TestTUIMoreLines(t *testing.T) {
 	}
 	// everything fits: no lines for more
 	few := newMouseTUI(t, 3)
-	if s := ansi.Strip(strings.Join(few.lines(time.Now()), "\n")); strings.Contains(s, "more  (ctrl") {
+	if s := ansi.Strip(strings.Join(few.lines(), "\n")); strings.Contains(s, "more  (ctrl") {
 		t.Errorf("3 photos:\n%s", s)
 	}
 }
@@ -744,13 +744,13 @@ func TestTUIAltScreen(t *testing.T) {
 	if !v.AltScreen || v.MouseMode != tea.MouseModeCellMotion {
 		t.Errorf("alt screen = %v, mouse = %v", v.AltScreen, v.MouseMode)
 	}
-	lines := m.lines(time.Now())
+	lines := m.lines()
 	if len(lines) != m.height || !strings.Contains(ansi.Strip(lines[len(lines)-1]), "q quit") {
 		t.Errorf("%d lines for %d rows, last %q", len(lines), m.height, ansi.Strip(lines[len(lines)-1]))
 	}
 
 	m.height = minHeight - 1
-	if lines := m.lines(time.Now()); len(lines) != 1 || !strings.Contains(ansi.Strip(lines[0]), "needs a terminal of") {
+	if lines := m.lines(); len(lines) != 1 || !strings.Contains(ansi.Strip(lines[0]), "needs a terminal of") {
 		t.Errorf("too low: %q", lines)
 	}
 	if m = m.send(t, keys("enter", "y")...); m.confirm || m.result != tuiRunning {

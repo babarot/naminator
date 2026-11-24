@@ -4,10 +4,12 @@ import (
 	"image/color"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/babarot/naminator/internal/ui/statusline"
 	"github.com/babarot/naminator/internal/ui/theme"
 )
 
@@ -69,7 +71,7 @@ func TestEveryStateHasAKeyLine(t *testing.T) {
 			t.Errorf("states %q and %q have the same key line %q", s, other, line)
 		}
 		seen[line] = s
-		lines := m.lines(goldenNow)
+		lines := m.lines()
 		if last := ansi.Strip(lines[len(lines)-1]); !strings.Contains(last, line) {
 			t.Errorf("state %q: the last line is %q, not its keys", s, last)
 		}
@@ -97,7 +99,7 @@ func TestKeysStayInTheirState(t *testing.T) {
 		} {
 			m := states(t)[s]
 			got := m.send(t, k)
-			if got.result != tuiRunning || got.format != m.format || got.view != m.view || got.sel != m.sel || got.insert || got.notice != "" {
+			if got.result != tuiRunning || got.format != m.format || got.view != m.view || got.sel != m.sel || got.insert || got.status() != "" {
 				t.Errorf("state %q: %v acted on what is under (result %v, format %q, view %v, sel %d)", s, k, got.result, got.format, got.view, got.sel)
 			}
 		}
@@ -141,5 +143,55 @@ func TestBackgroundColor(t *testing.T) {
 		if got, want := m.st.CursorLine("x", false), theme.For(tt.dark).CursorLine("x", false); got != want {
 			t.Errorf("dark %v: %q, want %q", tt.dark, got, want)
 		}
+	}
+}
+
+// What the status line shows goes by itself, with one timer for each.
+func TestStatusGoes(t *testing.T) {
+	m := newMouseTUI(t, 3)
+	now := goldenNow
+	m.now = func() time.Time { return now }
+	save := tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}
+
+	next, cmd := m.Update(save)
+	m, _ = next.(tuiModel)
+	if !strings.Contains(m.status(), "saved as the format") || cmd == nil {
+		t.Fatalf("status = %q, timer %v", m.status(), cmd != nil)
+	}
+	// a key leaves it, and sets no other timer
+	next, cmd = m.Update(keys("j")[0])
+	m, _ = next.(tuiModel)
+	if m.status() == "" || cmd != nil {
+		t.Errorf("after a key: status = %q, timer %v", m.status(), cmd != nil)
+	}
+	now = now.Add(statusline.InfoFor)
+	m = m.send(t, statusDueMsg{})
+	if m.status() != "" || !m.timerAt.IsZero() {
+		t.Errorf("at its end: status = %q, timerAt %v", m.status(), m.timerAt)
+	}
+
+	// told again before it goes, it stays longer, with a timer for that
+	m = m.send(t, save)
+	now = now.Add(time.Second)
+	next, cmd = m.Update(save)
+	m, _ = next.(tuiModel)
+	if cmd == nil || !m.timerAt.Equal(now.Add(statusline.InfoFor)) {
+		t.Errorf("told again: timer %v at %v", cmd != nil, m.timerAt)
+	}
+	now = now.Add(statusline.InfoFor - time.Second)
+	next, cmd = m.Update(statusDueMsg{}) // the timer of the first
+	m, _ = next.(tuiModel)
+	if m.status() == "" || cmd == nil {
+		t.Errorf("at the end of the first: status = %q, timer %v", m.status(), cmd != nil)
+	}
+
+	// a refusal goes at the next key
+	m.setFormat("{nope}")
+	m = m.send(t, save)
+	if !strings.Contains(m.status(), "not saved") {
+		t.Fatalf("status = %q", m.status())
+	}
+	if m = m.send(t, keys("j")...); m.status() != "" {
+		t.Errorf("after a key: %q", m.status())
 	}
 }
