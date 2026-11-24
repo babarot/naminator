@@ -112,9 +112,9 @@ func (p *phase) apply(msg tea.Msg, now time.Time) (*item, *failure) {
 			it = p.add(key, filepath.Base(key))
 		}
 		if msg.err != nil {
-			return p.finish(it, markFailed, "", msg.err.Error(), time.Duration(msg.duration), now)
+			return p.finish(it, markFailed, "", msg.err.Error(), msg.duration, now)
 		}
-		return p.finish(it, markNone, "", "", time.Duration(msg.duration), now)
+		return p.finish(it, markNone, "", "", msg.duration, now)
 
 	case renameResultMsg:
 		it := p.byKey[msg.photo.Path]

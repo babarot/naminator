@@ -6,19 +6,16 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/babarot/naminator/internal/config"
 	"github.com/babarot/naminator/internal/photo"
 	"github.com/babarot/naminator/internal/rename"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/jessevdk/go-flags"
 	"github.com/mattn/go-isatty"
 	"github.com/nxadm/tail"
@@ -60,18 +57,25 @@ func (osFS) RemoveAll(path string) error                  { return os.RemoveAll(
 func (osFS) Stat(name string) (os.FileInfo, error)        { return os.Stat(name) }
 func (osFS) ReadDir(name string) ([]os.DirEntry, error)   { return os.ReadDir(name) }
 
-// Sender abstracts message sending to the UI.
-type Sender interface {
-	Send(msg tea.Msg)
+// tracker is told what the work does (Tracker).
+type tracker interface {
+	ReadStart(image string)
+	ReadDone(image string, p photo.Photo, took time.Duration, err error)
+	RenameStart(photos []photo.Photo, base string, into, dry bool)
+	Renamed(p photo.Photo, dry bool, err error)
+	Warn(name, text string)
+	CleanStart(dry bool)
+	Cleaned(dir string, dry, empty bool, err error)
+	Finish()
 }
 
 type CLI struct {
 	args   []string
 	opt    Option
 	logger *slog.Logger
-	p      *tea.Program
-	sender Sender
-	images []string
+	// tracker is the display of the work
+	tracker tracker
+	images  []string
 	// exifs has one extractor per worker; images are processed in parallel
 	// by len(exifs) workers.
 	exifs []photo.Extractor
@@ -85,7 +89,7 @@ type CLI struct {
 	// planned are the paths the interactive screen showed, by photo path:
 	// a photo goes there unless the path is taken by then
 	planned map[string]string
-	// base and into are where rename targets are shown from (phaseStartMsg)
+	// base and into are where rename targets are shown from (RenamePhase)
 	base string
 	into bool
 	// canceled is closed when the user stops the run (Ctrl+C)
@@ -97,16 +101,23 @@ type CLI struct {
 var errCanceled = errors.New("canceled")
 
 func main() {
-	if err := runMain(); err != nil {
-		if errors.Is(err, errCanceled) {
-			os.Exit(130)
-		}
-		fmt.Fprintf(os.Stderr, "%s: %v\n", appName, err)
-		os.Exit(1)
-	}
+	os.Exit(Main(version, revision))
 }
 
-func runMain() error {
+// Main runs naminator with the arguments of the process, and returns its
+// exit code. version and revision are what --version shows.
+func Main(version, revision string) int {
+	if err := run(version, revision); err != nil {
+		if errors.Is(err, errCanceled) {
+			return 130
+		}
+		fmt.Fprintf(os.Stderr, "%s: %v\n", appName, err)
+		return 1
+	}
+	return 0
+}
+
+func run(version, revision string) error {
 	var opt Option
 	parser := flags.NewParser(&opt, flags.Default)
 	parser.Name = appName
@@ -248,15 +259,13 @@ func runMain() error {
 		base:   base,
 		into:   into,
 	}
-	first := phaseStartMsg{kind: phaseExif, keys: images, limit: len(exifs)}
+	first := ReadPhase(images, len(exifs))
 
 	if !isatty.IsTerminal(os.Stdout.Fd()) {
 		if opt.Interactive {
 			return errors.New("-i needs a terminal")
 		}
-		disableStyles()
-		cli.sender = newPlainSender(os.Stdout, first)
-		return cli.run()
+		return cli.run(NewPlainRun(os.Stdout, first))
 	}
 
 	canceled := make(chan struct{})
@@ -270,25 +279,12 @@ func runMain() error {
 		if err != nil {
 			return err
 		}
-		tui := newTUIModel(args, images, format, opt.DestDir, opt.Dryrun, opt.Clean, cfg.AllPresets(), cli.fs, cfgPath, cancel)
-		return cli.runInteractive(tui)
+		return cli.runInteractive(NewScreen(ScreenOptions{
+			Args: args, Images: images, Format: format, DestDir: opt.DestDir, Dry: opt.Dryrun, Clean: opt.Clean,
+			Presets: cfg.AllPresets(), FS: cli.fs, ConfigPath: cfgPath, Cancel: cancel,
+		}))
 	}
-
-	model := newModel(first, cancel)
-	model.awaitReply = true
-	if title := model.startCompact(); title != "" {
-		fmt.Println(title)
-	}
-	cli.p = tea.NewProgram(model, tea.WithoutSignalHandler())
-	cli.sender = cli.p
-	return cli.run()
-}
-
-type duration time.Duration
-
-func (d duration) String() string {
-	sec := float64(d) / float64(time.Second)
-	return fmt.Sprintf("%.2fs", sec)
+	return cli.run(NewRun(first, cancel))
 }
 
 // displayBase returns where rename targets are shown from: the destination
@@ -305,8 +301,9 @@ func displayBase(args []string, opt Option) (base string, into bool) {
 	return "", false
 }
 
-func (c CLI) run() error {
-	return c.runWork(func() {
+func (c CLI) run(display *Run) error {
+	c.tracker = display
+	return c.runWork(display, func() {
 		// Process all photos, then remove empty directories
 		c.processAll()
 		c.finish()
@@ -316,95 +313,24 @@ func (c CLI) run() error {
 // finish removes the empty directories when asked, and ends the display.
 func (c CLI) finish() {
 	if c.opt.Clean && !c.isCanceled() {
-		c.sender.Send(phaseStartMsg{kind: phaseClean, dry: c.opt.Dryrun})
+		c.tracker.CleanStart(c.opt.Dryrun)
 		c.clean(c.args)
 	}
-	// Signal completion to stop UI rendering
-	c.sender.Send(finishMsg{})
+	c.tracker.Finish()
 }
 
-// runWork runs work with the display: plain without a terminal (c.p is
-// nil), else the program c.p, which quits once work has sent finishMsg{}
-// and everything is printed.
-func (c CLI) runWork(work func()) error {
+// runWork runs work with its display.
+func (c CLI) runWork(display *Run, work func()) error {
 	c.logger.Debug("start")
 	defer c.logger.Debug("end")
 
-	if c.p == nil {
-		work()
-		return nil
-	}
-	if _, err := c.runProgram(c.p, work); err != nil {
+	if err := display.Do(work); err != nil {
 		return err
 	}
 	if c.isCanceled() {
 		return errCanceled
 	}
 	return nil
-}
-
-// runProgram runs p while work runs, and returns p's final model once both
-// have ended. A signal reaches p as interruptMsg, as Ctrl+C does; a failure
-// of p stops the work.
-func (c CLI) runProgram(p *tea.Program, work func()) (tea.Model, error) {
-	// A signal stops the run as Ctrl+C does, from before the work starts
-	// until this returns: the work can end long before p, as the reading
-	// under the screen does. It also cancels the run, so that a signal as
-	// p ends starts no next program. After the first, the default handling
-	// is back, so a second one ends the process at once.
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sig)
-	interrupted := func() {
-		if c.cancel != nil {
-			c.cancel()
-		}
-	}
-	ran := make(chan struct{})
-	forwarded := make(chan struct{})
-	go func() {
-		defer close(forwarded)
-		select {
-		case <-sig:
-			signal.Stop(sig)
-			interrupted()
-			p.Send(interruptMsg{})
-		case <-ran:
-		}
-	}()
-	defer func() {
-		close(ran)
-		<-forwarded
-		// a signal that came as p ended, before it was forwarded
-		select {
-		case <-sig:
-			interrupted()
-		default:
-		}
-	}()
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		work()
-	}()
-	final, err := p.Run()
-	if err != nil {
-		// The program failed: stop the work too.
-		c.cancel()
-	}
-	// Wait for the work, so that no rename starts after this and the
-	// exiftool processes are closed only once nothing uses them. Sends to
-	// the ended program return at once.
-	<-done
-	// FIXME(bubbletea): drain the terminal's replies to the queries
-	// bubbletea v2 sends, which it fails to read during shutdown; they
-	// would leak into the shell. Only a terminal replies: draining
-	// anything else (</dev/null, a pipe) would wait forever on Linux.
-	if isatty.IsTerminal(os.Stdin.Fd()) {
-		drainStdinAfterBubbletea()
-	}
-	return final, err
 }
 
 // isCanceled reports whether the user stopped the run.
@@ -438,10 +364,10 @@ func (c CLI) renameAll(photos []photo.Photo, announce bool) {
 		photos[i].Sidecars = sidecars[photo.Path]
 	}
 	if announce {
-		c.sender.Send(phaseStartMsg{kind: phaseRename, keys: photo.Paths(photos), base: c.base, into: c.into, dry: c.opt.Dryrun})
+		c.tracker.RenameStart(photos, c.base, c.into, c.opt.Dryrun)
 	}
 	for _, w := range warnings {
-		c.sender.Send(warnMsg{name: filepath.Base(w.Path), text: w.Reason})
+		c.tracker.Warn(filepath.Base(w.Path), w.Reason)
 		c.logger.Warn("sidecar not moved", "path", w.Path, "reason", w.Reason)
 	}
 	for _, photo := range photos {
@@ -487,15 +413,10 @@ feed:
 }
 
 func (c CLI) extract(exif photo.Extractor, image string) (photo.Photo, bool) {
-	c.sender.Send(exifStartMsg{image: image})
+	c.tracker.ReadStart(image)
 	startTime := time.Now()
 	photo, err := exif.Extract(image)
-	c.sender.Send(exifResultMsg{
-		image:    image,
-		photo:    photo,
-		duration: duration(time.Since(startTime)),
-		err:      err,
-	})
+	c.tracker.ReadDone(image, photo, time.Since(startTime), err)
 	if err != nil {
 		c.logger.Error("failed to get exif, so skip to rename", "err", err,
 			"name", photo.Name,
@@ -507,7 +428,7 @@ func (c CLI) extract(exif photo.Extractor, image string) (photo.Photo, bool) {
 
 func (c CLI) renameAndReport(photo photo.Photo) {
 	photo, dryrun, err := c.rename(photo)
-	c.sender.Send(renameResultMsg{photo: photo, dryrun: dryrun, err: err})
+	c.tracker.Renamed(photo, dryrun, err)
 	if err != nil {
 		c.logger.Error("failed to rename", "err", err,
 			"name", photo.Name,
@@ -612,7 +533,7 @@ func (c CLI) clean(paths []string) {
 		}
 		removable, dirs, err := rename.EmptyDirs(path, moves)
 		if err != nil {
-			c.sender.Send(cleanResultMsg{dir: base, err: fmt.Errorf("emptyDirs: %w", err)})
+			c.tracker.Cleaned(base, false, false, fmt.Errorf("emptyDirs: %w", err))
 			continue
 		}
 		for _, dir := range dirs {
@@ -622,17 +543,17 @@ func (c CLI) clean(paths []string) {
 				name = filepath.Join(base, rel)
 			}
 			if c.opt.Dryrun {
-				c.sender.Send(cleanResultMsg{dir: name, dryrun: true, empty: true})
+				c.tracker.Cleaned(name, true, true, nil)
 				continue
 			}
 			if err := c.fs.RemoveAll(dir); err != nil {
-				c.sender.Send(cleanResultMsg{dir: name, empty: true, err: err})
+				c.tracker.Cleaned(name, false, true, err)
 			} else {
-				c.sender.Send(cleanResultMsg{dir: name, empty: true})
+				c.tracker.Cleaned(name, false, true, nil)
 			}
 		}
 		if !removable {
-			c.sender.Send(cleanResultMsg{dir: base, dryrun: c.opt.Dryrun, empty: false})
+			c.tracker.Cleaned(base, c.opt.Dryrun, false, nil)
 		}
 	}
 }

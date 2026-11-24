@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -36,10 +37,16 @@ func newTestTUI(t *testing.T, n int) (tuiModel, []photo.Photo) {
 		photos = append(photos, photo.Photo{Name: filepath.Base(path), Path: path, Dir: "card", Extension: "jpg", CreatedAt: taken})
 	}
 	cfg := config.Config{}
-	m := newTUIModel([]string{"card"}, images, rename.Presets[0].Format, "", false, false, cfg.AllPresets(), osFS{}, filepath.Join(t.TempDir(), "config.yaml"), nil)
+	m := newTUIModel([]string{"card"}, images, rename.Presets[0].Format, "", false, false, cfg.AllPresets(), diskFS{}, filepath.Join(t.TempDir(), "config.yaml"), nil)
 	m.width, m.height = 100, 30
 	return m, photos
 }
+
+// diskFS is the real filesystem, which the screen only reads.
+type diskFS struct{ rename.FileSystem }
+
+func (diskFS) Stat(name string) (os.FileInfo, error)      { return os.Stat(name) }
+func (diskFS) ReadDir(name string) ([]os.DirEntry, error) { return os.ReadDir(name) }
 
 func (m tuiModel) send(t *testing.T, msgs ...tea.Msg) tuiModel {
 	t.Helper()
@@ -195,7 +202,7 @@ func TestTUIConfirm(t *testing.T) {
 		t.Fatalf("format = %q, insert = %v, result = %v after the confirmation", m.format, m.insert, m.result)
 	}
 	d := m.decision()
-	if d.format != rename.Presets[0].Format || len(d.targets) != 3 || d.targets[photos[1].Path] != "card/2026-10-04_14-22-01.jpg" {
+	if d.Format != rename.Presets[0].Format || len(d.Targets) != 3 || d.Targets[photos[1].Path] != "card/2026-10-04_14-22-01.jpg" {
 		t.Errorf("decision %+v", d)
 	}
 }
@@ -322,7 +329,7 @@ func newCardsTUI(t *testing.T) tuiModel {
 		msgs = append(msgs, exifResultMsg{image: path, photo: p})
 	}
 	cfg := config.Config{}
-	m := newTUIModel([]string{filepath.Join(root, "card1"), filepath.Join(root, "card2")}, images, "{ext}/{date}/{date}_{time}", "", false, true, cfg.AllPresets(), osFS{}, filepath.Join(root, "config.yaml"), nil)
+	m := newTUIModel([]string{filepath.Join(root, "card1"), filepath.Join(root, "card2")}, images, "{ext}/{date}/{date}_{time}", "", false, true, cfg.AllPresets(), diskFS{}, filepath.Join(root, "config.yaml"), nil)
 	m.width, m.height = 120, 40
 	return m.send(t, msgs...)
 }
@@ -504,7 +511,7 @@ func TestTUIFileTime(t *testing.T) {
 	// renamed with the others once confirmed, and not reported as failed
 	m = m.send(t, keys("enter", "y")...)
 	d := m.decision()
-	if len(d.fileTime) != 1 || d.fileTime[0].Path != r.key || len(d.failed) != 0 {
+	if !slices.ContainsFunc(d.Photos, func(p photo.Photo) bool { return p.Path == r.key }) || len(d.Failed) != 0 {
 		t.Errorf("decided %+v", d)
 	}
 	// m again takes it back
@@ -538,7 +545,7 @@ func TestRenameUsesThePlannedPath(t *testing.T) {
 		fs:      osFS{},
 		paths:   rename.NewReserver(),
 		moves:   rename.NewPendingMoves(),
-		sender:  &mockSender{},
+		tracker: &fakeTracker{},
 		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 		namer:   rename.NewNamer(rename.MustParseTemplate("{dir}/{date}_{time}"), []string{card}, ""),
 		planned: planned,

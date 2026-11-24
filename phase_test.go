@@ -23,7 +23,7 @@ func TestPhaseApply(t *testing.T) {
 		if p.items[0].status != itemRunning || p.items[1].status != itemQueued {
 			t.Fatalf("statuses = %v, %v", p.items[0].status, p.items[1].status)
 		}
-		it, f := p.apply(exifResultMsg{image: "/p/a.jpg", photo: photo.Photo{Path: "/p/a.jpg"}, duration: duration(300 * time.Millisecond)}, t0.Add(time.Second))
+		it, f := p.apply(exifResultMsg{image: "/p/a.jpg", photo: photo.Photo{Path: "/p/a.jpg"}, duration: 300 * time.Millisecond}, t0.Add(time.Second))
 		if it == nil || it.mark != markNone || f != nil {
 			t.Errorf("ok result: item=%+v failure=%v", it, f)
 		}
@@ -119,7 +119,7 @@ func TestPhaseTarget(t *testing.T) {
 
 func TestPhaseRow(t *testing.T) {
 	p := newPhase(phaseStartMsg{kind: phaseExif, keys: []string{"/p/broken.jpg", "/p/写真のファイル名がとても長い場合のテスト.jpg"}}, t0)
-	p.apply(exifResultMsg{image: "/p/broken.jpg", err: errors.New("no date found\ntried: DateTimeOriginal"), duration: duration(100 * time.Millisecond)}, t0)
+	p.apply(exifResultMsg{image: "/p/broken.jpg", err: errors.New("no date found\ntried: DateTimeOriginal"), duration: 100 * time.Millisecond}, t0)
 
 	row := plain(p.row(p.items[0], "", t0, 0))
 	if !strings.HasPrefix(row, "  ✗ broken.jpg") || !strings.HasSuffix(row, "0.1s  no date found…") {

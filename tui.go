@@ -39,18 +39,20 @@ const (
 	tuiCanceled            // Ctrl+C or a signal: nothing renamed
 )
 
-// tuiDecision is what the screen decided: the result, and the format to
-// rename with when confirmed.
+// tuiDecision is what the screen decided.
 type tuiDecision struct {
-	result tuiResult
-	format string
-	// failed are the photos whose EXIF data could not be read, to report,
-	// and fileTime those given the file's time instead, to rename too
-	failed   []failure
-	fileTime []photo.Photo
-	// targets are the paths previewed, by photo path: the run gives them,
-	// so that the photos go where they were shown to go
-	targets map[string]string
+	Result tuiResult
+	// Format is the format to rename with, under Base, when confirmed.
+	Format string
+	Base   string
+	// Photos are the photos to rename, in the order they were taken, those
+	// given the file's time included.
+	Photos []photo.Photo
+	// Targets are the paths previewed, by photo path: the run gives them,
+	// so that the photos go where they were shown to go.
+	Targets map[string]string
+	// Failed are the photos whose EXIF data could not be read, to report.
+	Failed []failure
 }
 
 type tuiView int
@@ -292,19 +294,16 @@ func (m tuiModel) end(r tuiResult) (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-// decision is what the screen decided: the format, where each photo goes,
-// and the photos to report or to rename by the file's time.
+// decision is what the screen decided.
 func (m tuiModel) decision() tuiDecision {
-	d := tuiDecision{result: m.result, format: m.format, targets: map[string]string{}}
+	d := tuiDecision{Result: m.result, Format: m.format, Base: m.base(), Photos: m.photos(), Targets: map[string]string{}}
+	photo.SortByTime(d.Photos)
 	for _, row := range m.rows {
 		if row.usable() && row.target != "" {
-			d.targets[row.photo.Path] = row.target
+			d.Targets[row.photo.Path] = row.target
 		}
-		switch {
-		case row.skipped():
-			d.failed = append(d.failed, failure{name: filepath.Base(row.key), err: row.err})
-		case row.fileTime:
-			d.fileTime = append(d.fileTime, row.photo)
+		if row.skipped() {
+			d.Failed = append(d.Failed, failure{name: filepath.Base(row.key), err: row.err})
 		}
 	}
 	return d
