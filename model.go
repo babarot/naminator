@@ -45,6 +45,15 @@ type model struct {
 // replyWait is how long the program waits for the terminal to answer.
 const replyWait = 500 * time.Millisecond
 
+// askAfter is when the program asks where the cursor is: after its first
+// frame (the renderer draws at 60 FPS), as bubbletea asks about the
+// keyboard when it draws the first frame, and the answer to the cursor's
+// position must come after that one.
+const askAfter = 50 * time.Millisecond
+
+// askReplyMsg asks the terminal where the cursor is.
+type askReplyMsg struct{}
+
 // repliedMsg says the wait for the terminal's answer is over.
 type repliedMsg struct{}
 
@@ -94,7 +103,11 @@ func (m model) Init() tea.Cmd {
 	if !m.awaitReply {
 		return m.spinner.Tick
 	}
-	return tea.Batch(m.spinner.Tick, tea.RequestCursorPosition, tea.Tick(replyWait, func(time.Time) tea.Msg { return repliedMsg{} }))
+	return tea.Batch(
+		m.spinner.Tick,
+		tea.Tick(askAfter, func(time.Time) tea.Msg { return askReplyMsg{} }),
+		tea.Tick(replyWait, func(time.Time) tea.Msg { return repliedMsg{} }),
+	)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -127,6 +140,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case printedMsg:
 		m.printing = false
 		return m, m.flush()
+
+	case askReplyMsg:
+		return m, tea.RequestCursorPosition
 
 	case tea.CursorPositionMsg, repliedMsg:
 		m.replied = true
