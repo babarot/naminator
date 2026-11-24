@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/babarot/naminator/internal/photo"
+	"github.com/babarot/naminator/internal/ui/theme"
 )
 
 // The golden views pin how the screens look, characters and colors, so
@@ -39,12 +40,10 @@ func goldenRoot(t *testing.T) string {
 	local := time.Local
 	time.Local = time.UTC
 	t.Cleanup(func() { time.Local = local })
-	enableStyles()
-	t.Cleanup(func() {
-		if _, ok := os.LookupEnv("NO_COLOR"); ok {
-			disableStyles()
-		}
-	})
+	t.Setenv("NO_COLOR", "") // restores it after the test
+	if err := os.Unsetenv("NO_COLOR"); err != nil {
+		t.Fatal(err)
+	}
 	return root
 }
 
@@ -64,7 +63,7 @@ func goldenTUI(t *testing.T, n int, dark bool) tuiModel {
 			t.Fatal(err)
 		}
 	}
-	m.dark = dark
+	m.st = theme.For(dark)
 	return m.send(t, readAll(photos)...)
 }
 
@@ -105,7 +104,7 @@ func goldenCases() []goldenCase {
 		{"list", 6, nil},
 		{"reading", 6, func(t *testing.T, m tuiModel) tuiModel {
 			fresh, photos := newTestTUI(t, 6)
-			fresh.dark = m.dark
+			fresh.st = m.st
 			return fresh.send(t, readAll(photos[:2])...)
 		}},
 		{"list-cursor", 6, func(t *testing.T, m tuiModel) tuiModel { return m.send(t, keys("j", "j")...) }},
@@ -126,15 +125,19 @@ func goldenCases() []goldenCase {
 		{"more-lines", 40, func(t *testing.T, m tuiModel) tuiModel { return m.send(t, keys("ctrl+d")...) }},
 		{"no-shooting-time", 6, func(t *testing.T, m tuiModel) tuiModel {
 			fresh, photos := newTestTUI(t, 6)
-			fresh.dark = m.dark
+			fresh.st = m.st
 			msgs := append(readAll(photos[:5]), exifResultMsg{image: photos[5].Path, err: photo.ErrNoShootingTime})
 			return fresh.send(t, append(msgs, keys("G")...)...)
 		}},
 		{"file-time", 6, func(t *testing.T, m tuiModel) tuiModel {
 			fresh, photos := newTestTUI(t, 6)
-			fresh.dark = m.dark
+			fresh.st = m.st
 			msgs := append(readAll(photos[:5]), exifResultMsg{image: photos[5].Path, err: photo.ErrNoShootingTime})
 			return fresh.send(t, append(msgs, keys("G", "m")...)...)
+		}},
+		{"no-color", 6, func(t *testing.T, m tuiModel) tuiModel {
+			m.st = theme.Plain()
+			return m
 		}},
 		{"too-low", 6, func(t *testing.T, m tuiModel) tuiModel {
 			m.height = minHeight - 1

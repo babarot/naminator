@@ -10,6 +10,7 @@ import (
 	"github.com/babarot/naminator/internal/photo"
 	"github.com/babarot/naminator/internal/rename"
 	"github.com/babarot/naminator/internal/ui/keymap"
+	"github.com/babarot/naminator/internal/ui/theme"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -56,6 +57,7 @@ type item struct {
 
 type phase struct {
 	phaseStartMsg
+	st       theme.Styles
 	items    []*item
 	byKey    map[string]*item
 	finished []*item // in the order they finished
@@ -77,8 +79,8 @@ type Failure struct {
 	Err  string
 }
 
-func newPhase(msg phaseStartMsg, now time.Time) *phase {
-	p := &phase{phaseStartMsg: msg, byKey: map[string]*item{}, start: now, last: now}
+func newPhase(msg phaseStartMsg, now time.Time, st theme.Styles) *phase {
+	p := &phase{phaseStartMsg: msg, st: st, byKey: map[string]*item{}, start: now, last: now}
 	for _, key := range msg.keys {
 		p.add(key, filepath.Base(key))
 	}
@@ -265,7 +267,7 @@ func (p *phase) title() string {
 // "✓ Read EXIF of 240 photos in 10.2s" or "✗ ..., 2 failed".
 func (p *phase) outcome() string {
 	if p.canceled {
-		return Dim.Render(iconError+" "+p.title()) + Dim.Render(" (canceled)")
+		return p.st.Dim.Render(iconError+" "+p.title()) + p.st.Dim.Render(" (canceled)")
 	}
 	took := formatSeconds(p.last.Sub(p.start))
 	failed := p.count(markFailed)
@@ -300,9 +302,9 @@ func (p *phase) outcome() string {
 		}
 	}
 	if failed > 0 {
-		return Red.Render(iconError) + " " + line + ", " + Red.Render(fmt.Sprintf("%d failed", failed))
+		return p.st.Failure.Render(iconError) + " " + line + ", " + p.st.Failure.Render(fmt.Sprintf("%d failed", failed))
 	}
-	return Green.Render(iconSuccess) + " " + line
+	return p.st.Success.Render(iconSuccess) + " " + line
 }
 
 // noneWord names the rows with nothing to show when they are only counted.
@@ -351,7 +353,7 @@ func (p *phase) row(it *item, spin string, now time.Time, width int) string {
 		if !p.timed() {
 			return ""
 		}
-		return Dim.Render(formatElapsed(d)) + "  "
+		return p.st.Dim.Render(formatElapsed(d)) + "  "
 	}
 	var line string
 	switch it.status {
@@ -360,15 +362,15 @@ func (p *phase) row(it *item, spin string, now time.Time, width int) string {
 		if p.timed() {
 			gap = strings.Repeat(" ", elapsedWidth+2)
 		}
-		line = fmt.Sprintf("  %s %s  %s%s", Dim.Render(iconQueued), Dim.Render(name), gap, Dim.Render("queued"))
+		line = fmt.Sprintf("  %s %s  %s%s", p.st.Dim.Render(iconQueued), p.st.Dim.Render(name), gap, p.st.Dim.Render("queued"))
 	case itemRunning:
 		status := "exiftool"
 		if p.kind != phaseExif {
 			status = "working"
 		}
-		line = fmt.Sprintf("  %s %s  %s%s", spin, name, elapsed(now.Sub(it.begin)), Dim.Render(status))
+		line = fmt.Sprintf("  %s %s  %s%s", spin, name, elapsed(now.Sub(it.begin)), p.st.Dim.Render(status))
 	case itemCanceled:
-		line = fmt.Sprintf("  %s %s", Dim.Render(iconError), Dim.Render(strings.TrimRight(name, " ")+" (canceled)"))
+		line = fmt.Sprintf("  %s %s", p.st.Dim.Render(iconError), p.st.Dim.Render(strings.TrimRight(name, " ")+" (canceled)"))
 	default:
 		switch it.mark {
 		case markFailed:
@@ -376,19 +378,19 @@ func (p *phase) row(it *item, spin string, now time.Time, width int) string {
 			if more {
 				first += iconEllipsis
 			}
-			line = fmt.Sprintf("  %s %s  %s%s", Red.Render(iconError), Bold.Render(name), elapsed(it.took), Dim.Render(first))
+			line = fmt.Sprintf("  %s %s  %s%s", p.st.Failure.Render(iconError), p.st.Strong.Render(name), elapsed(it.took), p.st.Dim.Render(first))
 		case markNone:
-			line = fmt.Sprintf("  %s %s  %s%s", Green.Render(iconSuccess), Dim.Render(name), elapsed(it.took), Dim.Render(it.label))
+			line = fmt.Sprintf("  %s %s  %s%s", p.st.Success.Render(iconSuccess), p.st.Dim.Render(name), elapsed(it.took), p.st.Dim.Render(it.label))
 		case markDelete:
-			line = fmt.Sprintf("  %s %s  %s", Red.Render(iconRemove), name, Red.Render(it.label))
+			line = fmt.Sprintf("  %s %s  %s", p.st.Failure.Render(iconRemove), name, p.st.Failure.Render(it.label))
 		default:
-			icon := Green.Render(iconSuccess)
+			icon := p.st.Success.Render(iconSuccess)
 			if it.mark == markChange {
-				icon = Yellow.Render(iconChange)
+				icon = p.st.Warn.Render(iconChange)
 			}
 			label := it.label
 			if rest, ok := strings.CutPrefix(label, "→ "); ok {
-				label = Dim.Render("→") + " " + rest
+				label = p.st.Dim.Render("→") + " " + rest
 			}
 			line = fmt.Sprintf("  %s %s  %s%s", icon, name, elapsed(it.took), label)
 		}
@@ -428,13 +430,13 @@ func (p *phase) gauge() []string {
 	running := p.countStatus(itemRunning)
 	g := fmt.Sprintf("exiftool %d/%d", running, p.limit)
 	if running >= p.limit {
-		return []string{Yellow.Render(g)}
+		return []string{p.st.Warn.Render(g)}
 	}
-	return []string{Dim.Render(g)}
+	return []string{p.st.Dim.Render(g)}
 }
 
-func joinDim(parts []string) string {
-	return strings.Join(parts, Dim.Render(" · "))
+func joinDim(st theme.Styles, parts []string) string {
+	return strings.Join(parts, st.Dim.Render(" · "))
 }
 
 // heading is the line above the rows of the full view: the title and the
@@ -443,15 +445,15 @@ func (p *phase) heading(now time.Time, width int) string {
 	done, total := p.progress()
 	line := p.title()
 	if p.kind != phaseClean {
-		line += fmt.Sprintf("  %s  %d/%d %s", progressBar(done, total, progressBarWidth), done, total, p.unit())
+		line += fmt.Sprintf("  %s  %d/%d %s", progressBar(p.st, done, total, progressBarWidth), done, total, p.unit())
 	}
-	line += "  " + Dim.Render(formatSeconds(now.Sub(p.start)))
+	line += "  " + p.st.Dim.Render(formatSeconds(now.Sub(p.start)))
 	more := p.gauge()
 	if q := p.countStatus(itemQueued); q > 0 && p.kind == phaseExif {
-		more = append(more, Dim.Render(fmt.Sprintf("%d queued", q)))
+		more = append(more, p.st.Dim.Render(fmt.Sprintf("%d queued", q)))
 	}
 	if len(more) > 0 {
-		line += Dim.Render("  · ") + joinDim(more)
+		line += p.st.Dim.Render("  · ") + joinDim(p.st, more)
 	}
 	return fitLine(line, width)
 }
@@ -472,7 +474,7 @@ func (p *phase) fullView(over bool, spin string, now time.Time, width int) []str
 		lines = append(lines, p.row(it, spin, now, width))
 	}
 	if !over {
-		lines = append(lines, "", "  "+Dim.Render(cancelHint()))
+		lines = append(lines, "", "  "+p.st.Dim.Render(cancelHint()))
 	}
 	return lines
 }
@@ -530,7 +532,7 @@ func (p *phase) compactView(spin string, now time.Time, width, height int) []str
 		left = append(left, fmt.Sprintf("%d %s", n, p.noneWord()))
 	}
 	if len(left) > 0 {
-		lines = append(lines, fitLine("  "+Dim.Render(strings.Join(left, " · ")), width))
+		lines = append(lines, fitLine("  "+p.st.Dim.Render(strings.Join(left, " · ")), width))
 	}
 	p.peak = max(p.peak, len(lines))
 	keep := p.peak
@@ -545,9 +547,9 @@ func (p *phase) compactView(spin string, now time.Time, width, height int) []str
 		lines = append(lines, "")
 	}
 	done, total := p.progress()
-	line := fmt.Sprintf("  %s  %d/%d %s  %s", progressBar(done, total, progressBarWidth), done, total, p.unit(), Dim.Render(formatSeconds(now.Sub(p.start))))
-	more := append(p.gauge(), Dim.Render(cancelHint()))
-	lines = append(lines, fitLine(line+Dim.Render("  · ")+joinDim(more), width))
+	line := fmt.Sprintf("  %s  %d/%d %s  %s", progressBar(p.st, done, total, progressBarWidth), done, total, p.unit(), p.st.Dim.Render(formatSeconds(now.Sub(p.start))))
+	more := append(p.gauge(), p.st.Dim.Render(cancelHint()))
+	lines = append(lines, fitLine(line+p.st.Dim.Render("  · ")+joinDim(p.st, more), width))
 	return lines
 }
 
@@ -556,7 +558,7 @@ func (p *phase) compactView(spin string, now time.Time, width, height int) []str
 func (p *phase) compactEnd() []string {
 	var lines []string
 	if n := p.count(markNone); n > 0 {
-		lines = append(lines, fmt.Sprintf("  %s %s", Green.Render(iconSuccess), Dim.Render(fmt.Sprintf("%d %s", n, p.noneWord()))))
+		lines = append(lines, fmt.Sprintf("  %s %s", p.st.Success.Render(iconSuccess), p.st.Dim.Render(fmt.Sprintf("%d %s", n, p.noneWord()))))
 	}
 	return append(lines, "", p.outcome())
 }
@@ -566,12 +568,12 @@ func (p *phase) compactEnd() []string {
 //
 //	broken.jpg:
 //	  exiftool: Error: File format error
-func errorReport(failures []Failure) []string {
+func errorReport(st theme.Styles, failures []Failure) []string {
 	var lines []string
 	for _, f := range failures {
-		lines = append(lines, "  "+Bold.Render(f.Name+":"))
+		lines = append(lines, "  "+st.Strong.Render(f.Name+":"))
 		for l := range strings.SplitSeq(f.Err, "\n") {
-			lines = append(lines, "    "+Dim.Render(l))
+			lines = append(lines, "    "+st.Dim.Render(l))
 		}
 		lines = append(lines, "")
 	}
@@ -579,12 +581,12 @@ func errorReport(failures []Failure) []string {
 }
 
 // progressBar draws done of total as a bar of width cells.
-func progressBar(done, total, width int) string {
+func progressBar(st theme.Styles, done, total, width int) string {
 	filled := 0
 	if total > 0 {
 		filled = min(width, done*width/total)
 	}
-	return Cyan.Render(strings.Repeat("━", filled)) + Dim.Render(strings.Repeat("─", width-filled))
+	return st.Active.Render(strings.Repeat("━", filled)) + st.Dim.Render(strings.Repeat("─", width-filled))
 }
 
 // formatSeconds formats d as in "2.1s".

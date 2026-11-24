@@ -10,6 +10,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/babarot/naminator/internal/ui/keymap"
+	"github.com/babarot/naminator/internal/ui/theme"
 )
 
 // model draws the run in the terminal, after gh-infra's spinner display. A
@@ -23,6 +24,7 @@ import (
 // the next phase is drawn below it. At the end the failures are printed in
 // full and the view is left empty.
 type model struct {
+	st       theme.Styles
 	phase    *phase
 	failures []Failure
 	spinner  spinner.Model
@@ -75,17 +77,19 @@ func newModel(first phaseStartMsg, cancel func()) model {
 	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
 		width, height = w, h
 	}
+	st := theme.For(true)
 	m := model{
+		st: st,
 		spinner: spinner.New(
 			spinner.WithSpinner(spinner.Jump),
-			spinner.WithStyle(Cyan),
+			spinner.WithStyle(st.Active),
 		),
 		width:  width,
 		height: height,
 		cancel: cancel,
 		now:    time.Now,
 	}
-	m.phase = newPhase(first, m.now())
+	m.phase = newPhase(first, m.now(), m.st)
 	return m
 }
 
@@ -120,7 +124,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case phaseStartMsg:
 		m.endPhase()
-		m.phase = newPhase(msg, m.now())
+		m.phase = newPhase(msg, m.now(), m.st)
 		if m.phase.wantCompact(m.height) {
 			m.phase.compact = true
 			m.queue = append(m.queue, m.phase.title(), "")
@@ -135,7 +139,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case finishMsg:
 		m.endPhase()
-		m.queue = append(m.queue, errorReport(m.failures)...)
+		m.queue = append(m.queue, errorReport(m.st, m.failures)...)
 		m.finished = true
 		return m, m.flush()
 

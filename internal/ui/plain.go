@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/babarot/naminator/internal/ui/theme"
+
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -22,7 +24,7 @@ type plainSender struct {
 
 func newPlainSender(w io.Writer, first phaseStartMsg) *plainSender {
 	s := &plainSender{w: w, now: time.Now}
-	s.phase = newPhase(first, s.now())
+	s.phase = newPhase(first, s.now(), theme.Plain())
 	_, _ = fmt.Fprintln(w, s.phase.title())
 	return s
 }
@@ -33,11 +35,11 @@ func (s *plainSender) Send(msg tea.Msg) {
 	switch msg := msg.(type) {
 	case phaseStartMsg:
 		s.endPhase()
-		s.phase = newPhase(msg, s.now())
+		s.phase = newPhase(msg, s.now(), theme.Plain())
 		_, _ = fmt.Fprintln(s.w, s.phase.title())
 	case finishMsg:
 		s.endPhase()
-		for _, line := range errorReport(s.failures) {
+		for _, line := range errorReport(theme.Plain(), s.failures) {
 			_, _ = fmt.Fprintln(s.w, line)
 		}
 	default:

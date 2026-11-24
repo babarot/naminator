@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/babarot/naminator/internal/photo"
+	"github.com/babarot/naminator/internal/ui/theme"
 )
 
 var t0 = time.Date(2026, 10, 3, 14, 0, 0, 0, time.UTC)
@@ -18,7 +19,7 @@ func plain(s string) string { return ansi.Strip(s) }
 
 func TestPhaseApply(t *testing.T) {
 	t.Run("exif", func(t *testing.T) {
-		p := newPhase(phaseStartMsg{kind: phaseExif, keys: []string{"/p/a.jpg", "/p/b.jpg"}, limit: 2}, t0)
+		p := newPhase(phaseStartMsg{kind: phaseExif, keys: []string{"/p/a.jpg", "/p/b.jpg"}, limit: 2}, t0, theme.Plain())
 		p.apply(exifStartMsg{image: "/p/a.jpg"}, t0)
 		if p.items[0].status != itemRunning || p.items[1].status != itemQueued {
 			t.Fatalf("statuses = %v, %v", p.items[0].status, p.items[1].status)
@@ -39,7 +40,7 @@ func TestPhaseApply(t *testing.T) {
 
 	t.Run("rename", func(t *testing.T) {
 		keys := []string{"/p/a.jpg", "/p/2026-10-03_14-00-00.jpg", "/p/c.jpg"}
-		p := newPhase(phaseStartMsg{kind: phaseRename, keys: keys, base: "/p"}, t0)
+		p := newPhase(phaseStartMsg{kind: phaseRename, keys: keys, base: "/p"}, t0, theme.Plain())
 		p.apply(renameResultMsg{photo: photo.Photo{Name: "a.jpg", Path: "/p/a.jpg", RenamedPath: "/p/2026-10-03/x.jpg"}}, t0)
 		p.apply(renameResultMsg{photo: photo.Photo{Name: "2026-10-03_14-00-00.jpg", Path: keys[1], RenamedPath: keys[1]}}, t0)
 		p.apply(renameResultMsg{photo: photo.Photo{Name: "c.jpg", Path: "/p/c.jpg"}, err: errors.New("permission denied")}, t0.Add(time.Second))
@@ -58,7 +59,7 @@ func TestPhaseApply(t *testing.T) {
 	})
 
 	t.Run("dry-run rename", func(t *testing.T) {
-		p := newPhase(phaseStartMsg{kind: phaseRename, keys: []string{"/p/a.jpg"}, dry: true}, t0)
+		p := newPhase(phaseStartMsg{kind: phaseRename, keys: []string{"/p/a.jpg"}, dry: true}, t0, theme.Plain())
 		p.apply(renameResultMsg{photo: photo.Photo{Name: "a.jpg", Path: "/p/a.jpg", RenamedPath: "/q/x.jpg"}, dryrun: true}, t0)
 		if p.items[0].mark != markChange {
 			t.Errorf("mark = %v, want markChange", p.items[0].mark)
@@ -69,7 +70,7 @@ func TestPhaseApply(t *testing.T) {
 	})
 
 	t.Run("clean adds rows as the directories come", func(t *testing.T) {
-		p := newPhase(phaseStartMsg{kind: phaseClean}, t0)
+		p := newPhase(phaseStartMsg{kind: phaseClean}, t0, theme.Plain())
 		p.apply(cleanResultMsg{dir: "DCIM/100MSDCF", empty: true}, t0)
 		p.apply(cleanResultMsg{dir: "DCIM", empty: false}, t0)
 		if len(p.items) != 2 || p.items[0].mark != markDelete || p.items[1].mark != markNone {
@@ -81,7 +82,7 @@ func TestPhaseApply(t *testing.T) {
 	})
 
 	t.Run("results after cancel are ignored", func(t *testing.T) {
-		p := newPhase(phaseStartMsg{kind: phaseExif, keys: []string{"/p/a.jpg", "/p/b.jpg"}}, t0)
+		p := newPhase(phaseStartMsg{kind: phaseExif, keys: []string{"/p/a.jpg", "/p/b.jpg"}}, t0, theme.Plain())
 		p.apply(exifStartMsg{image: "/p/a.jpg"}, t0)
 		p.cancel(t0)
 		it, f := p.apply(exifResultMsg{image: "/p/a.jpg", err: errors.New("late")}, t0)
@@ -118,7 +119,7 @@ func TestPhaseTarget(t *testing.T) {
 }
 
 func TestPhaseRow(t *testing.T) {
-	p := newPhase(phaseStartMsg{kind: phaseExif, keys: []string{"/p/broken.jpg", "/p/写真のファイル名がとても長い場合のテスト.jpg"}}, t0)
+	p := newPhase(phaseStartMsg{kind: phaseExif, keys: []string{"/p/broken.jpg", "/p/写真のファイル名がとても長い場合のテスト.jpg"}}, t0, theme.Plain())
 	p.apply(exifResultMsg{image: "/p/broken.jpg", err: errors.New("no date found\ntried: DateTimeOriginal"), duration: 100 * time.Millisecond}, t0)
 
 	row := plain(p.row(p.items[0], "", t0, 0))
@@ -146,18 +147,18 @@ func TestPhaseCompact(t *testing.T) {
 		}
 		return k
 	}
-	if newPhase(phaseStartMsg{kind: phaseExif, keys: keys(10)}, t0).wantCompact(40) {
+	if newPhase(phaseStartMsg{kind: phaseExif, keys: keys(10)}, t0, theme.Plain()).wantCompact(40) {
 		t.Error("10 rows on a tall terminal should be drawn whole")
 	}
-	if !newPhase(phaseStartMsg{kind: phaseExif, keys: keys(11)}, t0).wantCompact(0) {
+	if !newPhase(phaseStartMsg{kind: phaseExif, keys: keys(11)}, t0, theme.Plain()).wantCompact(0) {
 		t.Error("11 rows should be compact")
 	}
-	if !newPhase(phaseStartMsg{kind: phaseExif, keys: keys(5)}, t0).wantCompact(8) {
+	if !newPhase(phaseStartMsg{kind: phaseExif, keys: keys(5)}, t0, theme.Plain()).wantCompact(8) {
 		t.Error("rows taller than the terminal should be compact")
 	}
 
 	// the compact view keeps within the terminal, with a line for the cursor
-	p := newPhase(phaseStartMsg{kind: phaseExif, keys: keys(40), limit: 8}, t0)
+	p := newPhase(phaseStartMsg{kind: phaseExif, keys: keys(40), limit: 8}, t0, theme.Plain())
 	for _, k := range p.keys[:8] {
 		p.apply(exifStartMsg{image: k}, t0)
 	}
@@ -180,7 +181,7 @@ func TestPhaseCompactKeepsHeight(t *testing.T) {
 	for i := range 20 {
 		keys = append(keys, fmt.Sprintf("/p/%03d.jpg", i))
 	}
-	p := newPhase(phaseStartMsg{kind: phaseExif, keys: keys, limit: 8}, t0)
+	p := newPhase(phaseStartMsg{kind: phaseExif, keys: keys, limit: 8}, t0, theme.Plain())
 	for _, k := range keys[:8] {
 		p.apply(exifStartMsg{image: k}, t0)
 	}
@@ -206,7 +207,7 @@ func TestPhaseCompactKeepsHeight(t *testing.T) {
 }
 
 func TestErrorReport(t *testing.T) {
-	got := plain(strings.Join(errorReport([]Failure{{Name: "a.jpg", Err: "line 1\nline 2"}}), "\n"))
+	got := plain(strings.Join(errorReport(theme.Plain(), []Failure{{Name: "a.jpg", Err: "line 1\nline 2"}}), "\n"))
 	if want := "  a.jpg:\n    line 1\n    line 2\n"; got != want {
 		t.Errorf("report = %q, want %q", got, want)
 	}

@@ -1,12 +1,10 @@
 package ui
 
 import (
-	"os"
-
 	"github.com/babarot/naminator/internal/rename"
+	"github.com/babarot/naminator/internal/ui/theme"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 )
 
 // ScreenOptions are what the interactive screen is made with.
@@ -40,8 +38,6 @@ type Screen struct {
 // screen.
 func NewScreen(o ScreenOptions) *Screen {
 	m := newTUIModel(o.Args, o.Images, o.Format, o.DestDir, o.Dry, o.Clean, o.Presets, o.FS, o.ConfigPath, o.Cancel)
-	// the color of the cursor's line suits the terminal's background
-	m.dark = lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
 	p := tea.NewProgram(m, tea.WithoutSignalHandler())
 	return &Screen{Tracker: Tracker{p}, p: p, cancel: o.Cancel}
 }
@@ -58,5 +54,6 @@ func (s *Screen) Do(work func()) (Decision, error) {
 
 // FormatLine is the line that tells the format decided, above the run.
 func FormatLine(d Decision) string {
-	return Dim.Render("Format: ") + Blue.Render(d.Base) + d.Format
+	st := theme.For(true)
+	return st.Dim.Render("Format: ") + st.Path.Render(d.Base) + d.Format
 }
