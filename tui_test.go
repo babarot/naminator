@@ -11,16 +11,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/babarot/naminator/internal/config"
+	"github.com/babarot/naminator/internal/photo"
+	"github.com/babarot/naminator/internal/rename"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
 // newTestTUI returns a screen over n photos in card/, two of them taken in
 // the same second, none read yet.
-func newTestTUI(t *testing.T, n int) (tuiModel, []Photo) {
+func newTestTUI(t *testing.T, n int) (tuiModel, []photo.Photo) {
 	t.Helper()
 	var images []string
-	var photos []Photo
+	var photos []photo.Photo
 	at := time.Date(2026, 10, 4, 14, 22, 0, 0, time.UTC)
 	for i := range n {
 		path := filepath.Join("card", fmt.Sprintf("DSC%05d.JPG", i))
@@ -29,10 +33,10 @@ func newTestTUI(t *testing.T, n int) (tuiModel, []Photo) {
 		if i == 2 {
 			taken = at.Add(time.Second) // the same second as photo 1
 		}
-		photos = append(photos, Photo{Name: filepath.Base(path), Path: path, Dir: "card", Extension: "jpg", CreatedAt: taken})
+		photos = append(photos, photo.Photo{Name: filepath.Base(path), Path: path, Dir: "card", Extension: "jpg", CreatedAt: taken})
 	}
-	cfg := config{}
-	m := newTUIModel([]string{"card"}, images, presets[0].format, "", false, false, cfg.allPresets(), osFS{}, filepath.Join(t.TempDir(), "config.yaml"), nil)
+	cfg := config.Config{}
+	m := newTUIModel([]string{"card"}, images, rename.Presets[0].Format, "", false, false, cfg.AllPresets(), osFS{}, filepath.Join(t.TempDir(), "config.yaml"), nil)
 	m.width, m.height = 100, 30
 	return m, photos
 }
@@ -73,7 +77,7 @@ func keys(s ...string) []tea.Msg {
 	return out
 }
 
-func readAll(photos []Photo) []tea.Msg {
+func readAll(photos []photo.Photo) []tea.Msg {
 	var out []tea.Msg
 	for _, p := range photos {
 		out = append(out, exifResultMsg{image: p.Path, photo: p})
@@ -104,7 +108,7 @@ func TestTUIPlan(t *testing.T) {
 		t.Errorf("row 0 = %q", got)
 	}
 	// a photo without a shooting time is skipped
-	m = m.send(t, exifResultMsg{image: photos[3].Path, photo: Photo{Path: photos[3].Path}, err: errors.New("no date")})
+	m = m.send(t, exifResultMsg{image: photos[3].Path, photo: photo.Photo{Path: photos[3].Path}, err: errors.New("no date")})
 	if !strings.Contains(m.countLine(), "1 without a shooting time") {
 		t.Errorf("count line = %q", ansi.Strip(m.countLine()))
 	}
@@ -116,7 +120,7 @@ func TestTUIModes(t *testing.T) {
 
 	// normal mode: the keys move in the list, and do not edit
 	m = m.send(t, keys("j", "j", "k")...)
-	if m.sel != 1 || m.format != presets[0].format {
+	if m.sel != 1 || m.format != rename.Presets[0].Format {
 		t.Fatalf("sel = %d, format = %q", m.sel, m.format)
 	}
 	m = m.send(t, keys("G")...)
@@ -125,11 +129,11 @@ func TestTUIModes(t *testing.T) {
 	}
 	// insert mode: the keys edit the format, at its end with a
 	m = m.send(t, keys("a", "_{orig}")...)
-	if !m.insert || m.format != presets[0].format+"_{orig}" {
+	if !m.insert || m.format != rename.Presets[0].Format+"_{orig}" {
 		t.Fatalf("insert = %v, format = %q", m.insert, m.format)
 	}
 	m = m.send(t, keys("backspace")...)
-	if m.format != presets[0].format+"_{orig" || m.tplErr == "" {
+	if m.format != rename.Presets[0].Format+"_{orig" || m.tplErr == "" {
 		t.Errorf("format = %q, tplErr = %q", m.format, m.tplErr)
 	}
 	// enter only leaves insert mode: it never starts a rename
@@ -147,11 +151,11 @@ func TestTUIModes(t *testing.T) {
 func TestTUIPresets(t *testing.T) {
 	m, _ := newTestTUI(t, 1)
 	m = m.send(t, keys("tab")...)
-	if m.format != presets[1].format || m.presetName() != presets[1].name {
+	if m.format != rename.Presets[1].Format || m.presetName() != rename.Presets[1].Name {
 		t.Errorf("tab: %q (%s)", m.format, m.presetName())
 	}
 	m = m.send(t, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
-	if m.format != presets[len(presets)-1].format {
+	if m.format != rename.Presets[len(rename.Presets)-1].Format {
 		t.Errorf("shift+tab twice: %q", m.format)
 	}
 	// from a format of one's own, the first preset
@@ -160,7 +164,7 @@ func TestTUIPresets(t *testing.T) {
 		t.Errorf("name = %q", m.presetName())
 	}
 	m = m.send(t, keys("tab")...)
-	if m.format != presets[0].format {
+	if m.format != rename.Presets[0].Format {
 		t.Errorf("tab from custom: %q", m.format)
 	}
 }
@@ -187,11 +191,11 @@ func TestTUIConfirm(t *testing.T) {
 	}
 	// nothing changes what was confirmed afterwards
 	m = m.send(t, append(keys("tab", "i", "x", "ctrl+c"), interruptMsg{})...)
-	if m.format != presets[0].format || m.insert || m.result != tuiConfirmed {
+	if m.format != rename.Presets[0].Format || m.insert || m.result != tuiConfirmed {
 		t.Fatalf("format = %q, insert = %v, result = %v after the confirmation", m.format, m.insert, m.result)
 	}
 	d := m.decision()
-	if d.format != presets[0].format || len(d.targets) != 3 || d.targets[photos[1].Path] != "card/2026-10-04_14-22-01.jpg" {
+	if d.format != rename.Presets[0].Format || len(d.targets) != 3 || d.targets[photos[1].Path] != "card/2026-10-04_14-22-01.jpg" {
 		t.Errorf("decision %+v", d)
 	}
 }
@@ -242,7 +246,7 @@ func TestTUIView(t *testing.T) {
 
 func TestSaveFormat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "naminator", "config.yaml")
-	if err := saveFormat(path, "{ext}/{date}"); err != nil {
+	if err := config.SaveFormat(path, "{ext}/{date}"); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(path); string(b) != "format: \"{ext}/{date}\"\n" {
@@ -252,14 +256,14 @@ func TestSaveFormat(t *testing.T) {
 	if err := os.WriteFile(path, []byte("# mine\nclean: true\nformat: \"{date}\"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveFormat(path, "{year}/{date}"); err != nil {
+	if err := config.SaveFormat(path, "{year}/{date}"); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(path)
 	if string(b) != "# mine\nclean: true\nformat: \"{year}/{date}\"\n" {
 		t.Errorf("replaced = %q", b)
 	}
-	if c, err := loadConfig(path); err != nil || c.Format != "{year}/{date}" || !c.Clean {
+	if c, err := config.Load(path); err != nil || c.Format != "{year}/{date}" || !c.Clean {
 		t.Errorf("config = %+v, %v", c, err)
 	}
 }
@@ -268,19 +272,19 @@ func TestStartFormat(t *testing.T) {
 	dir := t.TempDir()
 	makeTree(t, dir, "card/a.jpg", "b.HEIC")
 	card, file := filepath.Join(dir, "card"), filepath.Join(dir, "b.HEIC")
-	cfg := config{Format: "{ext}/{date}/{date}_{time}"}
+	cfg := config.Config{Format: "{ext}/{date}/{date}_{time}"}
 	tests := []struct {
 		name string
 		opt  Option
-		cfg  config
+		cfg  config.Config
 		args []string
 		want string
 	}{
 		{"the config's format", Option{}, cfg, []string{card}, cfg.Format},
-		{"files only: in place", Option{}, cfg, []string{file}, presets[0].format},
-		{"no config: in place", Option{}, config{}, []string{card}, presets[0].format},
+		{"files only: in place", Option{}, cfg, []string{file}, rename.Presets[0].Format},
+		{"no config: in place", Option{}, config.Config{}, []string{card}, rename.Presets[0].Format},
 		{"--format first", Option{Format: "{date}"}, cfg, []string{file}, "{date}"},
-		{"--preset", Option{Preset: "by date"}, cfg, []string{card}, presets[1].format},
+		{"--preset", Option{Preset: "by date"}, cfg, []string{card}, rename.Presets[1].Format},
 	}
 	for _, tt := range tests {
 		if got, err := startFormat(tt.opt, tt.cfg, tt.args); err != nil || got != tt.want {
@@ -310,15 +314,15 @@ func newCardsTUI(t *testing.T) tuiModel {
 		makeTree(t, root, card+"/"+name)
 		path := filepath.Join(root, card, name)
 		images = append(images, path)
-		p := Photo{Name: name, Path: path, Dir: filepath.Join(root, card), Extension: "jpg", CreatedAt: at.Add(time.Duration(i) * time.Minute)}
+		p := photo.Photo{Name: name, Path: path, Dir: filepath.Join(root, card), Extension: "jpg", CreatedAt: at.Add(time.Duration(i) * time.Minute)}
 		if i == 7 {
-			msgs = append(msgs, exifResultMsg{image: path, photo: Photo{Path: path}, err: errors.New("no date")})
+			msgs = append(msgs, exifResultMsg{image: path, photo: photo.Photo{Path: path}, err: errors.New("no date")})
 			continue
 		}
 		msgs = append(msgs, exifResultMsg{image: path, photo: p})
 	}
-	cfg := config{}
-	m := newTUIModel([]string{filepath.Join(root, "card1"), filepath.Join(root, "card2")}, images, "{ext}/{date}/{date}_{time}", "", false, true, cfg.allPresets(), osFS{}, filepath.Join(root, "config.yaml"), nil)
+	cfg := config.Config{}
+	m := newTUIModel([]string{filepath.Join(root, "card1"), filepath.Join(root, "card2")}, images, "{ext}/{date}/{date}_{time}", "", false, true, cfg.AllPresets(), osFS{}, filepath.Join(root, "config.yaml"), nil)
 	m.width, m.height = 120, 40
 	return m.send(t, msgs...)
 }
@@ -521,7 +525,7 @@ func TestRenameUsesThePlannedPath(t *testing.T) {
 	named := filepath.Join(card, "2026-10-06_11-00-00.jpg")
 	shot := filepath.Join(card, "screenshot.jpg")
 	at := time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC)
-	photos := []Photo{
+	photos := []photo.Photo{
 		{Name: "2026-10-06_11-00-00.jpg", Path: named, Dir: card, Extension: "jpg", CreatedAt: at.Add(10 * time.Hour)},
 		{Name: "screenshot.jpg", Path: shot, Dir: card, Extension: "jpg", CreatedAt: at.Add(11 * time.Hour)},
 	}
@@ -532,11 +536,11 @@ func TestRenameUsesThePlannedPath(t *testing.T) {
 	cli := CLI{
 		opt:     Option{},
 		fs:      osFS{},
-		paths:   newPathReserver(),
-		moves:   newPendingMoves(),
+		paths:   rename.NewReserver(),
+		moves:   rename.NewPendingMoves(),
 		sender:  &mockSender{},
 		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
-		namer:   newNamer(mustParseTemplate("{dir}/{date}_{time}"), []string{card}, ""),
+		namer:   rename.NewNamer(rename.MustParseTemplate("{dir}/{date}_{time}"), []string{card}, ""),
 		planned: planned,
 	}
 	cli.renameAll(photos, true)
@@ -548,10 +552,10 @@ func TestRenameUsesThePlannedPath(t *testing.T) {
 	// a planned path taken by then is not overwritten
 	makeTree(t, root, "card2/a.jpg", "card2/taken.jpg")
 	card2 := filepath.Join(root, "card2")
-	cli.paths = newPathReserver()
+	cli.paths = rename.NewReserver()
 	cli.planned = map[string]string{filepath.Join(card2, "a.jpg"): filepath.Join(card2, "taken.jpg")}
-	cli.namer = newNamer(mustParseTemplate("{dir}/taken"), []string{card2}, "")
-	p, _, err := cli.rename(Photo{Name: "a.jpg", Path: filepath.Join(card2, "a.jpg"), Dir: card2, Extension: "jpg", CreatedAt: at})
+	cli.namer = rename.NewNamer(rename.MustParseTemplate("{dir}/taken"), []string{card2}, "")
+	p, _, err := cli.rename(photo.Photo{Name: "a.jpg", Path: filepath.Join(card2, "a.jpg"), Dir: card2, Extension: "jpg", CreatedAt: at})
 	if err != nil || p.RenamedPath != filepath.Join(card2, "taken_1.jpg") {
 		t.Errorf("renamed to %q, %v; want taken_1.jpg", p.RenamedPath, err)
 	}
@@ -583,11 +587,11 @@ func TestInteractiveByDefault(t *testing.T) {
 func TestStartFormatWithDest(t *testing.T) {
 	dir := t.TempDir()
 	makeTree(t, dir, "card/a.jpg")
-	got, err := startFormat(Option{DestDir: "/out"}, config{}, []string{filepath.Join(dir, "card")})
+	got, err := startFormat(Option{DestDir: "/out"}, config.Config{}, []string{filepath.Join(dir, "card")})
 	if err != nil || got != "{date}_{time}" {
 		t.Errorf("startFormat = %q, %v", got, err)
 	}
-	if got, _ := startFormat(Option{DestDir: "/out"}, config{Format: "{ext}/{date}"}, []string{filepath.Join(dir, "card")}); got != "{ext}/{date}" {
+	if got, _ := startFormat(Option{DestDir: "/out"}, config.Config{Format: "{ext}/{date}"}, []string{filepath.Join(dir, "card")}); got != "{ext}/{date}" {
 		t.Errorf("with a config: %q", got)
 	}
 }

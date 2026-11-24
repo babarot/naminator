@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/babarot/naminator/internal/photo"
+
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -57,7 +59,7 @@ func TestModelCompactRun(t *testing.T) {
 		if i == 3 {
 			err = errors.New("File format error\nsecond line")
 		}
-		m.send(exifStartMsg{image: k}, exifResultMsg{image: k, photo: Photo{Path: k}, err: err})
+		m.send(exifStartMsg{image: k}, exifResultMsg{image: k, photo: photo.Photo{Path: k}, err: err})
 	}
 	// only the failure is printed while reading; the rest is counted
 	if got := m.printed(); !strings.Contains(got, "✗ IMG_0003.HEIC") || strings.Contains(got, "IMG_0004") {
@@ -74,7 +76,7 @@ func TestModelCompactRun(t *testing.T) {
 		if i == 0 {
 			to = k // already named
 		}
-		m.send(renameResultMsg{photo: Photo{Name: k[3:], Path: k, RenamedPath: to}})
+		m.send(renameResultMsg{photo: photo.Photo{Name: k[3:], Path: k, RenamedPath: to}})
 	}
 	m.send(finishMsg{})
 
@@ -114,7 +116,7 @@ func TestModelFullView(t *testing.T) {
 		t.Errorf("nothing should be printed while drawn whole, got %q", m.queue)
 	}
 	for _, k := range keys {
-		m.send(exifResultMsg{image: k, photo: Photo{Path: k}})
+		m.send(exifResultMsg{image: k, photo: photo.Photo{Path: k}})
 	}
 	m.send(phaseStartMsg{kind: phaseRename, keys: keys})
 	// the whole view of the phase is kept above, its heading now the outcome
@@ -130,7 +132,7 @@ func TestModelCtrlC(t *testing.T) {
 	m := newTestModel(phaseStartMsg{kind: phaseExif, keys: keys, limit: 2}, 30)
 	m.cancel = func() { canceled = true }
 	m.startCompact()
-	m.send(exifStartMsg{image: keys[0]}, exifStartMsg{image: keys[1]}, exifResultMsg{image: keys[0], photo: Photo{Path: keys[0]}})
+	m.send(exifStartMsg{image: keys[0]}, exifStartMsg{image: keys[1]}, exifResultMsg{image: keys[0], photo: photo.Photo{Path: keys[0]}})
 	m.send(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if !canceled {
 		t.Fatal("Ctrl+C should cancel the work")
@@ -191,10 +193,10 @@ func TestPlainSender(t *testing.T) {
 			err = errors.New("bad")
 		}
 		s.Send(exifStartMsg{image: k})
-		s.Send(exifResultMsg{image: k, photo: Photo{Path: k}, err: err})
+		s.Send(exifResultMsg{image: k, photo: photo.Photo{Path: k}, err: err})
 	}
 	s.Send(phaseStartMsg{kind: phaseRename, keys: []string{keys[0]}, dry: true})
-	s.Send(renameResultMsg{photo: Photo{Name: "IMG_0000.HEIC", Path: keys[0], RenamedPath: "/p/x.heic"}, dryrun: true})
+	s.Send(renameResultMsg{photo: photo.Photo{Name: "IMG_0000.HEIC", Path: keys[0], RenamedPath: "/p/x.heic"}, dryrun: true})
 	s.Send(finishMsg{})
 
 	got := plain(buf.String())

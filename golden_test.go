@@ -10,13 +10,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/babarot/naminator/internal/photo"
 )
 
 // The golden views pin how the screens look, characters and colors, so
 // that a change that alters them shows as a diff of testdata/golden. Run
 // go test -run TestGolden -update to accept one.
 
-var updateGolden = flag.Bool("update", false, "rewrite testdata/golden")
+var updateGolden = flag.Bool("update", false, "rewrite testdata/golden, and the table of docs/architecture.md")
 
 // goldenNow is the time the golden views are drawn at.
 var goldenNow = time.Date(2026, 10, 4, 15, 0, 0, 0, time.UTC)
@@ -109,13 +111,13 @@ func TestGoldenTUI(t *testing.T) {
 		{"no-shooting-time", 6, func(t *testing.T, m tuiModel) tuiModel {
 			fresh, photos := newTestTUI(t, 6)
 			fresh.dark = m.dark
-			msgs := append(readAll(photos[:5]), exifResultMsg{image: photos[5].Path, err: errNoShootingTime})
+			msgs := append(readAll(photos[:5]), exifResultMsg{image: photos[5].Path, err: photo.ErrNoShootingTime})
 			return fresh.send(t, append(msgs, keys("G")...)...)
 		}},
 		{"file-time", 6, func(t *testing.T, m tuiModel) tuiModel {
 			fresh, photos := newTestTUI(t, 6)
 			fresh.dark = m.dark
-			msgs := append(readAll(photos[:5]), exifResultMsg{image: photos[5].Path, err: errNoShootingTime})
+			msgs := append(readAll(photos[:5]), exifResultMsg{image: photos[5].Path, err: photo.ErrNoShootingTime})
 			return fresh.send(t, append(msgs, keys("G", "m")...)...)
 		}},
 	}
@@ -157,7 +159,7 @@ func TestGoldenRun(t *testing.T) {
 		for i, k := range keys[:3] {
 			m.send(exifStartMsg{image: k})
 			if i < 2 {
-				m.send(exifResultMsg{image: k, photo: Photo{Path: k}})
+				m.send(exifResultMsg{image: k, photo: photo.Photo{Path: k}})
 			}
 		}
 	}
@@ -167,7 +169,7 @@ func TestGoldenRun(t *testing.T) {
 			if i == 3 {
 				err = errors.New("File format error")
 			}
-			m.send(exifStartMsg{image: k}, exifResultMsg{image: k, photo: Photo{Path: k}, err: err})
+			m.send(exifStartMsg{image: k}, exifResultMsg{image: k, photo: photo.Photo{Path: k}, err: err})
 		}
 	}
 	renamed := func(m *model) {
@@ -179,7 +181,7 @@ func TestGoldenRun(t *testing.T) {
 			if i == 0 {
 				to = k // already named
 			}
-			m.send(renameResultMsg{photo: Photo{Name: filepath.Base(k), Path: k, RenamedPath: to}})
+			m.send(renameResultMsg{photo: photo.Photo{Name: filepath.Base(k), Path: k, RenamedPath: to}})
 		}
 	}
 	cases := []struct {
@@ -193,7 +195,7 @@ func TestGoldenRun(t *testing.T) {
 			for i, k := range photoKeys(20)[:12] {
 				m.send(exifStartMsg{image: k})
 				if i%3 != 0 {
-					m.send(exifResultMsg{image: k, photo: Photo{Path: k}})
+					m.send(exifResultMsg{image: k, photo: photo.Photo{Path: k}})
 				}
 			}
 		}},

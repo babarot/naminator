@@ -1,4 +1,4 @@
-package main
+package rename
 
 import (
 	"fmt"
@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/gabriel-vasile/mimetype"
+	"github.com/babarot/naminator/internal/photo"
 )
 
 // Sidecars are files that go with a photo and are named after it, such as
@@ -21,13 +21,13 @@ var sidecarExts = []string{".xmp", ".aae", ".dop", ".pp3"}
 // a raw file and one of these share a sidecar, the raw file owns it.
 var rasterExts = []string{".jpg", ".jpeg", ".heic", ".heif", ".hif", ".png", ".tif", ".tiff", ".webp"}
 
-// sidecarWarning is a sidecar left where it is, and why.
-type sidecarWarning struct {
-	path   string
-	reason string
+// SidecarWarning is a sidecar left where it is, and why.
+type SidecarWarning struct {
+	Path   string
+	Reason string
 }
 
-// findSidecars returns the sidecars of photos by photo path, and the
+// FindSidecars returns the sidecars of photos by photo path, and the
 // sidecars that are left because no single photo owns them. A sidecar is in
 // the directory of its photo and named after its file name (DSC05501.ARW.xmp)
 // or after its name without the extension (DSC05501.xmp). The latter can be
@@ -38,7 +38,7 @@ type sidecarWarning struct {
 // are renamed or not, so that a sidecar is not taken from a raw file whose
 // EXIF data cannot be read, or which was not given. A sidecar whose owner
 // is not renamed stays where it is.
-func findSidecars(fsys FileSystem, photos []Photo) (map[string][]string, []sidecarWarning) {
+func FindSidecars(fsys FileSystem, photos []photo.Photo) (map[string][]string, []SidecarWarning) {
 	renamed := map[string]bool{}
 	var dirs []string
 	seen := map[string]bool{}
@@ -50,7 +50,7 @@ func findSidecars(fsys FileSystem, photos []Photo) (map[string][]string, []sidec
 		}
 	}
 	owned := map[string][]string{}
-	var warnings []sidecarWarning
+	var warnings []SidecarWarning
 	for _, dir := range dirs {
 		entries, err := fsys.ReadDir(dir)
 		if err != nil {
@@ -63,7 +63,7 @@ func findSidecars(fsys FileSystem, photos []Photo) (map[string][]string, []sidec
 			case e.IsDir():
 			case slices.Contains(sidecarExts, strings.ToLower(filepath.Ext(name))):
 				sidecars = append(sidecars, name)
-			case renamed[filepath.Join(dir, name)] || isImage(filepath.Join(dir, name)):
+			case renamed[filepath.Join(dir, name)] || photo.IsImage(filepath.Join(dir, name)):
 				images = append(images, name)
 			}
 		}
@@ -72,19 +72,13 @@ func findSidecars(fsys FileSystem, photos []Photo) (map[string][]string, []sidec
 			owner, reason := sidecarOwner(images, strings.TrimSuffix(name, filepath.Ext(name)))
 			switch {
 			case reason != "":
-				warnings = append(warnings, sidecarWarning{path: path, reason: reason})
+				warnings = append(warnings, SidecarWarning{Path: path, Reason: reason})
 			case owner != "" && renamed[filepath.Join(dir, owner)]:
 				owned[filepath.Join(dir, owner)] = append(owned[filepath.Join(dir, owner)], path)
 			}
 		}
 	}
 	return owned, warnings
-}
-
-// isImage reports whether the file at path is an image, by its content.
-func isImage(path string) bool {
-	mime, err := mimetype.DetectFile(path)
-	return err == nil && strings.HasPrefix(mime.String(), "image/")
 }
 
 // sidecarOwner returns the name of the image a sidecar named stem plus an
@@ -119,10 +113,10 @@ func sidecarOwner(images []string, stem string) (owner, reason string) {
 	return "", fmt.Sprintf("not moved: it is named after %s, and none of them is the only raw file", strings.Join(matches, " and "))
 }
 
-// sidecarTarget returns the path the sidecar at path goes to when its
+// SidecarTarget returns the path the sidecar at path goes to when its
 // photo is renamed from photo to renamed: named after the new name as it
 // was named after the old one.
-func sidecarTarget(photo, renamed, path string) string {
+func SidecarTarget(photo, renamed, path string) string {
 	name := filepath.Base(path)
 	ext := filepath.Ext(name)
 	if strings.TrimSuffix(name, ext) == filepath.Base(photo) {

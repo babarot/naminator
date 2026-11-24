@@ -8,75 +8,24 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/babarot/naminator/internal/photo"
+	"github.com/babarot/naminator/internal/rename"
 )
-
-func TestFindSidecars(t *testing.T) {
-	root := t.TempDir()
-	makeTree(t, root,
-		"card/DSC05501.ARW", "card/DSC05501.JPG", "card/DSC05501.xmp", // shared: the raw file owns it
-		"card/DSC05502.ARW", "card/DSC05502.ARW.xmp", // named after the file name
-		"card/DSC05503.JPG", "card/DSC05503.HEIC", "card/DSC05503.xmp", // no raw file: left
-		"card/DSC05504.JPG", "card/DSC05504.XMP", // upper case extension
-		"card/notes.xmp",    // no photo of that name: not a sidecar
-		"card/DSC05501.txt", // not a sidecar extension
-		"iphone/IMG_2033.HEIC", "iphone/IMG_2033.AAE",
-	)
-	var photos []Photo
-	for _, p := range []string{"card/DSC05501.ARW", "card/DSC05501.JPG", "card/DSC05502.ARW", "card/DSC05503.JPG", "card/DSC05503.HEIC", "card/DSC05504.JPG", "iphone/IMG_2033.HEIC"} {
-		photos = append(photos, Photo{Path: filepath.Join(root, p)})
-	}
-	owned, warnings := findSidecars(osFS{}, photos)
-	got := map[string]string{}
-	for photo, scs := range owned {
-		for _, sc := range scs {
-			got[filepath.Base(sc)] = filepath.Base(photo)
-		}
-	}
-	want := map[string]string{
-		"DSC05501.xmp":     "DSC05501.ARW",
-		"DSC05502.ARW.xmp": "DSC05502.ARW",
-		"DSC05504.XMP":     "DSC05504.JPG",
-		"IMG_2033.AAE":     "IMG_2033.HEIC",
-	}
-	if len(got) != len(want) {
-		t.Errorf("owned = %v, want %v", got, want)
-	}
-	for sc, photo := range want {
-		if got[sc] != photo {
-			t.Errorf("%s belongs to %q, want %q", sc, got[sc], photo)
-		}
-	}
-	if len(warnings) != 1 || filepath.Base(warnings[0].path) != "DSC05503.xmp" || !strings.Contains(warnings[0].reason, "DSC05503.HEIC") {
-		t.Errorf("warnings = %+v, want DSC05503.xmp left", warnings)
-	}
-}
-
-func TestSidecarTarget(t *testing.T) {
-	tests := []struct{ sidecar, want string }{
-		{"/c/DSC05501.xmp", "/o/2026-10-04_14-22-09.xmp"},
-		{"/c/DSC05501.XMP", "/o/2026-10-04_14-22-09.XMP"},
-		{"/c/DSC05501.ARW.xmp", "/o/2026-10-04_14-22-09.arw.xmp"},
-	}
-	for _, tt := range tests {
-		if got := sidecarTarget("/c/DSC05501.ARW", "/o/2026-10-04_14-22-09.arw", tt.sidecar); got != tt.want {
-			t.Errorf("sidecarTarget(%q) = %q, want %q", tt.sidecar, got, tt.want)
-		}
-	}
-}
 
 func sidecarCLI(root string, opt Option) CLI {
 	return CLI{
 		opt:    opt,
 		fs:     osFS{},
-		paths:  newPathReserver(),
-		moves:  newPendingMoves(),
+		paths:  rename.NewReserver(),
+		moves:  rename.NewPendingMoves(),
 		sender: &mockSender{},
-		namer:  newNamer(mustParseTemplate("{ext}/{date}/{date}_{time}"), []string{filepath.Join(root, "card")}, ""),
+		namer:  rename.NewNamer(rename.MustParseTemplate("{ext}/{date}/{date}_{time}"), []string{filepath.Join(root, "card")}, ""),
 	}
 }
 
-func sidecarPhoto(root, name string) Photo {
-	return Photo{
+func sidecarPhoto(root, name string) photo.Photo {
+	return photo.Photo{
 		Name:      name,
 		Path:      filepath.Join(root, "card", name),
 		Dir:       filepath.Join(root, "card"),
@@ -137,7 +86,7 @@ func TestRenameDryRunPredictsSidecars(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "card", "DSC05501.xmp")); err != nil {
 		t.Errorf("dry run should not move the sidecar: %v", err)
 	}
-	empty, _, err := emptyDirs(filepath.Join(root, "card"), cli.moves)
+	empty, _, err := rename.EmptyDirs(filepath.Join(root, "card"), cli.moves)
 	if err != nil || !empty {
 		t.Errorf("emptyDirs = %v, %v, want the card predicted empty", empty, err)
 	}
@@ -147,18 +96,18 @@ func TestProcessAllReportsSidecarsLeft(t *testing.T) {
 	root := t.TempDir()
 	makeTree(t, root, "card/DSC05503.JPG", "card/DSC05503.HEIC", "card/DSC05503.xmp")
 	at := time.Date(2026, 10, 4, 14, 22, 9, 0, time.UTC)
-	photos := map[string]Photo{}
+	photos := map[string]photo.Photo{}
 	var images []string
 	for _, name := range []string{"DSC05503.JPG", "DSC05503.HEIC"} {
 		path := filepath.Join(root, "card", name)
 		images = append(images, path)
-		photos[path] = Photo{Name: name, Path: path, Dir: filepath.Join(root, "card"), Extension: strings.ToLower(strings.TrimPrefix(filepath.Ext(name), ".")), CreatedAt: at}
+		photos[path] = photo.Photo{Name: name, Path: path, Dir: filepath.Join(root, "card"), Extension: strings.ToLower(strings.TrimPrefix(filepath.Ext(name), ".")), CreatedAt: at}
 	}
 	sender := &mockSender{}
 	cli := sidecarCLI(root, Option{Dryrun: true})
 	cli.sender = sender
 	cli.images = images
-	cli.exifs = []ExifExtractor{&mockExif{photos: photos}}
+	cli.exifs = []photo.Extractor{&mockExif{photos: photos}}
 	cli.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	cli.processAll()
 
@@ -170,42 +119,6 @@ func TestProcessAllReportsSidecarsLeft(t *testing.T) {
 	}
 	if len(warned) != 1 || warned[0].name != "DSC05503.xmp" {
 		t.Errorf("warnings = %+v, want DSC05503.xmp", warned)
-	}
-}
-
-// writeTIFF writes the start of a TIFF file, which is enough to be read as
-// an image (raw files are TIFF based).
-func writeTIFF(t *testing.T, path string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte("II*\x00\x08\x00\x00\x00\x00\x00"), 0644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// A raw file that is not renamed (its EXIF data cannot be read, or it was
-// not given) still owns the sidecar it shares: the JPEG does not take it.
-func TestFindSidecarsKeepsTheRawFilesSidecar(t *testing.T) {
-	root := t.TempDir()
-	makeTree(t, root, "card/DSC05501.JPG", "card/DSC05501.xmp")
-	writeTIFF(t, filepath.Join(root, "card", "DSC05501.ARW"))
-	owned, warnings := findSidecars(osFS{}, []Photo{{Path: filepath.Join(root, "card", "DSC05501.JPG")}})
-	if len(owned) != 0 || len(warnings) != 0 {
-		t.Errorf("owned = %v, warnings = %v: the sidecar should stay with the raw file", owned, warnings)
-	}
-}
-
-// The movie of a Live Photo is not an image, so it does not share the
-// photo's sidecar.
-func TestFindSidecarsIgnoresLivePhotoMovies(t *testing.T) {
-	root := t.TempDir()
-	makeTree(t, root, "iphone/IMG_2033.HEIC", "iphone/IMG_2033.MOV", "iphone/IMG_2033.AAE")
-	heic := filepath.Join(root, "iphone", "IMG_2033.HEIC")
-	owned, warnings := findSidecars(osFS{}, []Photo{{Path: heic}})
-	if len(owned[heic]) != 1 || len(warnings) != 0 {
-		t.Errorf("owned = %v, warnings = %v, want the AAE with the HEIC", owned, warnings)
 	}
 }
 

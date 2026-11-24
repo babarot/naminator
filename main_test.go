@@ -13,7 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/barasher/go-exiftool"
+	"github.com/babarot/naminator/internal/photo"
+	"github.com/babarot/naminator/internal/rename"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -94,18 +95,18 @@ func (m *mockFS) Stat(name string) (os.FileInfo, error) {
 
 // mockExif returns predefined Photo data.
 type mockExif struct {
-	photos map[string]Photo
+	photos map[string]photo.Photo
 	err    error
 }
 
-func (m *mockExif) Extract(path string) (Photo, error) {
+func (m *mockExif) Extract(path string) (photo.Photo, error) {
 	if m.err != nil {
-		return Photo{Name: filepath.Base(path), Path: path}, m.err
+		return photo.Photo{Name: filepath.Base(path), Path: path}, m.err
 	}
 	if p, ok := m.photos[path]; ok {
 		return p, nil
 	}
-	return Photo{Name: filepath.Base(path), Path: path}, errors.New("no exif data")
+	return photo.Photo{Name: filepath.Base(path), Path: path}, errors.New("no exif data")
 }
 
 // mockSender collects all sent messages for assertions.
@@ -134,7 +135,7 @@ func TestBuildNewPath(t *testing.T) {
 	jst := time.FixedZone("JST", 9*60*60)
 	createdAt := time.Date(2024, 3, 15, 14, 30, 45, 0, jst)
 
-	photo := Photo{
+	photo := photo.Photo{
 		Name:      "test.jpg",
 		Path:      "/photos/raw/test.jpg",
 		Dir:       "/photos/raw",
@@ -209,7 +210,7 @@ func TestBuildNewPathDifferentExtensions(t *testing.T) {
 
 	for _, ext := range []string{"jpg", "png", "heic", "arw", "cr2"} {
 		t.Run(ext, func(t *testing.T) {
-			photo := Photo{
+			photo := photo.Photo{
 				Dir:       "/photos/raw",
 				Extension: ext,
 				CreatedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, jst),
@@ -229,7 +230,7 @@ func TestRenameWithMockFS(t *testing.T) {
 	jst := time.FixedZone("JST", 9*60*60)
 	createdAt := time.Date(2024, 3, 15, 14, 30, 45, 0, jst)
 
-	photo := Photo{
+	photo := photo.Photo{
 		Name:      "test.jpg",
 		Path:      "/photos/raw/test.jpg",
 		Dir:       "/photos/raw",
@@ -239,7 +240,7 @@ func TestRenameWithMockFS(t *testing.T) {
 
 	t.Run("normal rename calls MkdirAll then Rename", func(t *testing.T) {
 		fs := newMockFS()
-		cli := CLI{opt: Option{}, fs: fs, paths: newPathReserver()}
+		cli := CLI{opt: Option{}, fs: fs, paths: rename.NewReserver()}
 		got, dryrun, err := cli.rename(photo)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -260,7 +261,7 @@ func TestRenameWithMockFS(t *testing.T) {
 
 	t.Run("dryrun skips all fs operations", func(t *testing.T) {
 		fs := newMockFS()
-		cli := CLI{opt: Option{Dryrun: true}, fs: fs, paths: newPathReserver()}
+		cli := CLI{opt: Option{Dryrun: true}, fs: fs, paths: rename.NewReserver()}
 		got, dryrun, err := cli.rename(photo)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -283,7 +284,7 @@ func TestRenameWithMockFS(t *testing.T) {
 	t.Run("rename error propagates", func(t *testing.T) {
 		fs := newMockFS()
 		fs.renameErr = errors.New("permission denied")
-		cli := CLI{opt: Option{}, fs: fs, paths: newPathReserver()}
+		cli := CLI{opt: Option{}, fs: fs, paths: rename.NewReserver()}
 		_, _, err := cli.rename(photo)
 		if err == nil || err.Error() != "permission denied" {
 			t.Errorf("expected 'permission denied', got %v", err)
@@ -293,7 +294,7 @@ func TestRenameWithMockFS(t *testing.T) {
 	t.Run("MkdirAll error propagates without renaming", func(t *testing.T) {
 		fs := newMockFS()
 		fs.mkdirErr = errors.New("read-only file system")
-		cli := CLI{opt: Option{}, fs: fs, paths: newPathReserver()}
+		cli := CLI{opt: Option{}, fs: fs, paths: rename.NewReserver()}
 		_, _, err := cli.rename(photo)
 		if err == nil || err.Error() != "read-only file system" {
 			t.Errorf("expected 'read-only file system', got %v", err)
@@ -305,7 +306,7 @@ func TestRenameWithMockFS(t *testing.T) {
 
 	t.Run("MkdirAll creates parent of RenamedPath", func(t *testing.T) {
 		fs := newMockFS()
-		cli := CLI{opt: Option{GroupByDate: true}, fs: fs, paths: newPathReserver()}
+		cli := CLI{opt: Option{GroupByDate: true}, fs: fs, paths: rename.NewReserver()}
 		got, _, _ := cli.rename(photo)
 		expectedDir := filepath.Dir(got.RenamedPath)
 		if len(fs.dirs) != 1 || fs.dirs[0] != expectedDir {
@@ -317,8 +318,8 @@ func TestRenameWithMockFS(t *testing.T) {
 func TestRenameCollision(t *testing.T) {
 	jst := time.FixedZone("JST", 9*60*60)
 	createdAt := time.Date(2024, 3, 15, 14, 30, 45, 0, jst)
-	newPhoto := func(name string) Photo {
-		return Photo{
+	newPhoto := func(name string) photo.Photo {
+		return photo.Photo{
 			Name:      name,
 			Path:      "/photos/raw/" + name,
 			Dir:       "/photos/raw",
@@ -329,7 +330,7 @@ func TestRenameCollision(t *testing.T) {
 
 	for _, dryrun := range []bool{false, true} {
 		t.Run(map[bool]string{false: "rename", true: "dryrun"}[dryrun], func(t *testing.T) {
-			cli := CLI{opt: Option{Dryrun: dryrun}, fs: newMockFS(), paths: newPathReserver()}
+			cli := CLI{opt: Option{Dryrun: dryrun}, fs: newMockFS(), paths: rename.NewReserver()}
 			var got []string
 			for _, name := range []string{"a.jpg", "b.jpg", "c.jpg"} {
 				photo, _, err := cli.rename(newPhoto(name))
@@ -352,75 +353,6 @@ func TestRenameCollision(t *testing.T) {
 	}
 }
 
-func TestPathReserver(t *testing.T) {
-	dir := t.TempDir()
-	write := func(name string) string {
-		path := filepath.Join(dir, name)
-		if err := os.WriteFile(path, nil, 0644); err != nil {
-			t.Fatal(err)
-		}
-		return path
-	}
-	want := filepath.Join(dir, "2024-03-15_14-30-45.jpg")
-
-	t.Run("skips a path taken by another file", func(t *testing.T) {
-		write("2024-03-15_14-30-45.jpg")
-		src := write("other.jpg")
-		got := newPathReserver().reserve(osFS{}, src, want)
-		if exp := filepath.Join(dir, "2024-03-15_14-30-45_1.jpg"); got != exp {
-			t.Errorf("reserve() = %q, want %q", got, exp)
-		}
-	})
-
-	t.Run("keeps the path the source already has", func(t *testing.T) {
-		src := write("2024-03-15_14-30-45.jpg")
-		got := newPathReserver().reserve(osFS{}, src, want)
-		if got != want {
-			t.Errorf("reserve() = %q, want %q", got, want)
-		}
-	})
-}
-
-func TestParseExifTime(t *testing.T) {
-	tests := []struct {
-		value string
-		// want is the clock time the name is made of, and offset the UTC
-		// offset in seconds the result should keep
-		want   string
-		offset int
-	}{
-		{"2024:01:02 15:04:05", "2024-01-02 15:04:05", 0},
-		{"2024:01:02 15:04:05+09:00", "2024-01-02 15:04:05", 9 * 60 * 60},
-		{"2024:01:02 15:04:05.123+09:00", "2024-01-02 15:04:05.123", 9 * 60 * 60},
-		{"2024:01:02 15:04:05.12+09:00", "2024-01-02 15:04:05.12", 9 * 60 * 60},
-		{"2024:01:02 15:04:05.1234-05:00", "2024-01-02 15:04:05.1234", -5 * 60 * 60},
-		{"2024:01:02 15:04:05.5Z", "2024-01-02 15:04:05.5", 0},
-		{"2024:01:02 15:04:05.123", "2024-01-02 15:04:05.123", 0},
-		// Taken in Paris: kept as the local time there, not converted
-		{"2024:07:14 23:30:00+02:00", "2024-07-14 23:30:00", 2 * 60 * 60},
-		// A clock time skipped by daylight saving time in many zones
-		{"2024:03:10 02:30:00", "2024-03-10 02:30:00", 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.value, func(t *testing.T) {
-			got, err := parseExifTime(tt.value)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if s := got.Format("2006-01-02 15:04:05.999999999"); s != tt.want {
-				t.Errorf("parseExifTime(%q) = %q, want %q", tt.value, s, tt.want)
-			}
-			if _, offset := got.Zone(); offset != tt.offset {
-				t.Errorf("parseExifTime(%q) offset = %d, want %d", tt.value, offset, tt.offset)
-			}
-		})
-	}
-
-	if _, err := parseExifTime("not a time"); err == nil {
-		t.Error("expected an error for an invalid value")
-	}
-}
-
 // countingExif wraps mockExif and records how many files it extracted.
 type countingExif struct {
 	mockExif
@@ -428,7 +360,7 @@ type countingExif struct {
 	count int
 }
 
-func (c *countingExif) Extract(path string) (Photo, error) {
+func (c *countingExif) Extract(path string) (photo.Photo, error) {
 	c.mu.Lock()
 	c.count++
 	c.mu.Unlock()
@@ -437,12 +369,12 @@ func (c *countingExif) Extract(path string) (Photo, error) {
 
 func TestProcessAll(t *testing.T) {
 	jst := time.FixedZone("JST", 9*60*60)
-	photos := map[string]Photo{}
+	photos := map[string]photo.Photo{}
 	var images []string
 	for i := range 20 {
 		path := filepath.Join("/photos/raw", fmt.Sprintf("%02d.jpg", i))
 		images = append(images, path)
-		photos[path] = Photo{
+		photos[path] = photo.Photo{
 			Name:      filepath.Base(path),
 			Path:      path,
 			Dir:       "/photos/raw",
@@ -465,7 +397,7 @@ func TestProcessAll(t *testing.T) {
 		sender: sender,
 		images: images,
 		fs:     newMockFS(),
-		paths:  newPathReserver(),
+		paths:  rename.NewReserver(),
 	}
 	for _, e := range exifs {
 		cli.exifs = append(cli.exifs, e)
@@ -512,14 +444,14 @@ func TestProcessAllNamesBurstInOrder(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			photos := map[string]Photo{}
+			photos := map[string]photo.Photo{}
 			var images []string
 			for num, subsec := range tt.shots {
 				for _, ext := range []string{"arw", "heif"} {
 					name := "A7C00" + num + "." + strings.ToUpper(ext)
 					path := filepath.Join("/DCIM/100MSDCF", name)
 					images = append(images, path)
-					photos[path] = Photo{
+					photos[path] = photo.Photo{
 						Name:      name,
 						Path:      path,
 						Dir:       "/DCIM/100MSDCF",
@@ -538,7 +470,7 @@ func TestProcessAllNamesBurstInOrder(t *testing.T) {
 					sender: sender,
 					images: images,
 					fs:     newMockFS(),
-					paths:  newPathReserver(),
+					paths:  rename.NewReserver(),
 				}
 				for range 4 {
 					cli.exifs = append(cli.exifs, &mockExif{photos: photos})
@@ -620,7 +552,7 @@ func TestClean(t *testing.T) {
 		}
 
 		fs := newMockFS()
-		// Use real Stat so emptyDirs works
+		// Use real Stat so rename.EmptyDirs works
 		fs.statFunc = func(name string) (os.FileInfo, error) { return os.Stat(name) }
 		sender := &mockSender{}
 		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: fs}
@@ -801,10 +733,10 @@ func TestClean(t *testing.T) {
 			opt:    Option{Clean: true, Dryrun: true, GroupByDate: true},
 			sender: sender,
 			fs:     osFS{},
-			paths:  newPathReserver(),
-			moves:  newPendingMoves(),
+			paths:  rename.NewReserver(),
+			moves:  rename.NewPendingMoves(),
 		}
-		if _, _, err := cli.rename(Photo{
+		if _, _, err := cli.rename(photo.Photo{
 			Name:      "a.jpg",
 			Path:      filepath.Join(root, "100MSDCF", "a.jpg"),
 			Dir:       filepath.Join(root, "100MSDCF"),
@@ -829,7 +761,7 @@ func TestClean(t *testing.T) {
 	})
 }
 
-// --- Filesystem utility tests ---
+// --- Helpers ---
 
 // makeTree creates files (and their directories) under root, and directories
 // for paths ending with "/".
@@ -852,160 +784,6 @@ func makeTree(t *testing.T, root string, paths ...string) {
 	}
 }
 
-func TestEmptyDirs(t *testing.T) {
-	tests := []struct {
-		name      string
-		tree      []string
-		wantEmpty bool
-		wantDirs  []string
-	}{
-		{"empty", nil, true, []string{"."}},
-		{"only junk files", []string{".DS_Store", "Thumbs.db", "desktop.ini"}, true, []string{"."}},
-		{"a file", []string{"a.jpg"}, false, nil},
-		{"nested empty directories", []string{"a/b/", "a/.DS_Store", "c/"}, true, []string{"."}},
-		{
-			"empty directories next to a file",
-			[]string{"100MSDCF/.DS_Store", "2024-03-15/a.jpg", "2024-03-15/old/", "misc/x/", "misc/y/"},
-			false,
-			[]string{"100MSDCF", "2024-03-15/old", "misc"},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			root := t.TempDir()
-			makeTree(t, root, tt.tree...)
-			empty, dirs, err := emptyDirs(root, nil)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if empty != tt.wantEmpty {
-				t.Errorf("empty = %v, want %v", empty, tt.wantEmpty)
-			}
-			var got []string
-			for _, dir := range dirs {
-				rel, _ := filepath.Rel(root, dir)
-				got = append(got, rel)
-			}
-			if strings.Join(got, ",") != strings.Join(tt.wantDirs, ",") {
-				t.Errorf("dirs = %v, want %v", got, tt.wantDirs)
-			}
-		})
-	}
-
-	t.Run("predicts with pending moves", func(t *testing.T) {
-		tests := []struct {
-			name      string
-			moves     [][2]string // src, dst relative to the parent of root
-			wantEmpty bool
-			wantDirs  []string
-		}{
-			{"nothing moved", nil, false, nil},
-			{
-				"all moved out",
-				[][2]string{{"DCIM/100MSDCF/a.jpg", "2024-03-15/a.jpg"}, {"DCIM/100MSDCF/b.jpg", "2024-03-15/b.jpg"}},
-				true, []string{"."},
-			},
-			{
-				"moved into a new directory under root",
-				[][2]string{{"DCIM/100MSDCF/a.jpg", "DCIM/2024-03-15/a.jpg"}, {"DCIM/100MSDCF/b.jpg", "DCIM/2024-03-15/b.jpg"}},
-				false, []string{"100MSDCF"},
-			},
-			{
-				"renamed in place",
-				[][2]string{{"DCIM/100MSDCF/a.jpg", "DCIM/100MSDCF/x.jpg"}, {"DCIM/100MSDCF/b.jpg", "DCIM/100MSDCF/y.jpg"}},
-				false, nil,
-			},
-			{
-				"one file left",
-				[][2]string{{"DCIM/100MSDCF/a.jpg", "2024-03-15/a.jpg"}},
-				false, nil,
-			},
-		}
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				parent := t.TempDir()
-				root := filepath.Join(parent, "DCIM")
-				makeTree(t, root, "100MSDCF/a.jpg", "100MSDCF/b.jpg", "100MSDCF/.DS_Store")
-				moves := newPendingMoves()
-				for _, m := range tt.moves {
-					moves.add(filepath.Join(parent, m[0]), filepath.Join(parent, m[1]))
-				}
-				empty, dirs, err := emptyDirs(root, moves)
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if empty != tt.wantEmpty {
-					t.Errorf("empty = %v, want %v", empty, tt.wantEmpty)
-				}
-				var got []string
-				for _, dir := range dirs {
-					rel, _ := filepath.Rel(root, dir)
-					got = append(got, rel)
-				}
-				if strings.Join(got, ",") != strings.Join(tt.wantDirs, ",") {
-					t.Errorf("dirs = %v, want %v", got, tt.wantDirs)
-				}
-			})
-		}
-	})
-
-	t.Run("non-existent dir", func(t *testing.T) {
-		if _, _, err := emptyDirs("/nonexistent/path", nil); err == nil {
-			t.Error("expected error for non-existent dir")
-		}
-	})
-}
-
-func TestWalkDir(t *testing.T) {
-	dir := t.TempDir()
-
-	subDir := filepath.Join(dir, "sub")
-	if err := os.MkdirAll(subDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"a.txt", "b.jpg"} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(subDir, "c.png"), []byte("x"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	files, err := walkDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files) != 3 {
-		t.Errorf("walkDir() returned %d files, want 3: %v", len(files), files)
-	}
-
-	for _, f := range files {
-		fi, _ := os.Stat(f)
-		if fi.IsDir() {
-			t.Errorf("walkDir() should not include directories, got %s", f)
-		}
-	}
-}
-
-func TestWalkDirEmpty(t *testing.T) {
-	dir := t.TempDir()
-	files, err := walkDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files) != 0 {
-		t.Errorf("expected 0 files, got %d", len(files))
-	}
-}
-
-func TestWalkDirNonExistent(t *testing.T) {
-	_, err := walkDir("/nonexistent/path")
-	if err == nil {
-		t.Error("expected error for non-existent path")
-	}
-}
-
 // firstClean is the first message, when it is a cleanResultMsg.
 func firstClean(msgs []tea.Msg) (cleanResultMsg, bool) {
 	if len(msgs) == 0 {
@@ -1013,18 +791,6 @@ func firstClean(msgs []tea.Msg) (cleanResultMsg, bool) {
 	}
 	msg, ok := msgs[0].(cleanResultMsg)
 	return msg, ok
-}
-
-// A photo without a shooting time says so, rather than the keys missing.
-func TestPhotoOfNoShootingTime(t *testing.T) {
-	info := exiftool.FileMetadata{Fields: map[string]any{"FileName": "screenshot.jpg", "SourceFile": "a/screenshot.jpg"}}
-	if _, err := photoOf(Photo{}, info); !errors.Is(err, errNoShootingTime) || err.Error() != "no shooting time in its EXIF; skipped" {
-		t.Errorf("err = %v", err)
-	}
-	info.Fields["DateTimeOriginal"] = "not a date"
-	if _, err := photoOf(Photo{}, info); err == nil || errors.Is(err, errNoShootingTime) {
-		t.Errorf("a date that cannot be read: err = %v", err)
-	}
 }
 
 // A signal stops the program for as long as it runs, also once the work
