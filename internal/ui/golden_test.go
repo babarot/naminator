@@ -80,12 +80,28 @@ func moreLine(t *testing.T, m tuiModel) int {
 	return 0
 }
 
-func TestGoldenTUI(t *testing.T) {
-	cases := []struct {
-		name string
-		n    int
-		do   func(t *testing.T, m tuiModel) tuiModel
-	}{
+// goldenCase is a screen pinned in testdata/golden/tui: n photos, and what
+// is done from there.
+type goldenCase struct {
+	name string
+	n    int
+	do   func(t *testing.T, m tuiModel) tuiModel
+}
+
+// at returns the screen of the case.
+func (tc goldenCase) at(t *testing.T, dark bool) tuiModel {
+	t.Helper()
+	goldenRoot(t)
+	m := goldenTUI(t, tc.n, dark)
+	if tc.do != nil {
+		m = tc.do(t, m)
+	}
+	return m
+}
+
+// goldenCases has at least one case of each state (TestEveryStateIsPinned).
+func goldenCases() []goldenCase {
+	return []goldenCase{
 		{"list", 6, nil},
 		{"reading", 6, func(t *testing.T, m tuiModel) tuiModel {
 			fresh, photos := newTestTUI(t, 6)
@@ -120,18 +136,21 @@ func TestGoldenTUI(t *testing.T) {
 			msgs := append(readAll(photos[:5]), exifResultMsg{image: photos[5].Path, err: photo.ErrNoShootingTime})
 			return fresh.send(t, append(msgs, keys("G", "m")...)...)
 		}},
+		{"too-low", 6, func(t *testing.T, m tuiModel) tuiModel {
+			m.height = minHeight - 1
+			return m
+		}},
 	}
-	for _, tc := range cases {
+}
+
+func TestGoldenTUI(t *testing.T) {
+	for _, tc := range goldenCases() {
 		for _, bg := range []struct {
 			name string
 			dark bool
 		}{{"dark", true}, {"light", false}} {
 			t.Run(tc.name+"/"+bg.name, func(t *testing.T) {
-				goldenRoot(t)
-				m := goldenTUI(t, tc.n, bg.dark)
-				if tc.do != nil {
-					m = tc.do(t, m)
-				}
+				m := tc.at(t, bg.dark)
 				got := normalize(t, strings.Join(m.lines(goldenNow), "\n"))
 				compareGolden(t, filepath.Join(testdataDir(t), "tui", tc.name+"-"+bg.name+".golden"), got)
 			})
