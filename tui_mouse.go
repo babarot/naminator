@@ -12,39 +12,19 @@ import (
 // Confirming and renaming stay on keys, and the mouse does nothing while
 // the screen asks y/N.
 
-// mouseOn reports whether the screen takes the mouse: once the terminal
-// told where it is drawn, and while nothing is asked.
+// mouseOn reports whether the screen takes the mouse: while nothing is
+// asked.
 func (m tuiModel) mouseOn() bool {
-	return m.settled && m.cursorY >= 0 && m.result == tuiRunning && !m.confirm && m.run == nil
+	return m.result == tuiRunning && !m.confirm && !m.tooLow()
 }
 
-// frameTop is the terminal's row the screen's first line is drawn on. It
-// starts on the row the prompt left the cursor on, and the terminal
-// scrolls up what does not fit below it: the most lines it has drawn, as
-// it stays where they put it when it gets fewer.
-func (m tuiModel) frameTop() int {
-	top := m.cursorY
-	if m.height > 0 {
-		top = min(top, m.height-max(m.peak, m.viewHeight()))
-	}
-	return max(0, top)
-}
-
-// The rows of the screen: the header, the format's box, the parts (left
-// out on a low terminal, unless the format is wrong), then the list.
+// The rows of the screen: the header, the format's box, the parts or what
+// is wrong with the format, then the list.
 const (
-	rowHeader  = 0
-	rowFormat  = 2 // the box's line with the format
-	firstLists = 5
+	rowHeader = 0
+	rowFormat = 2 // the box's line with the format
+	listTop   = 5
 )
-
-// listTop is the screen's row of the list's first line.
-func (m tuiModel) listTop() int {
-	if m.tight() && m.tplErr == "" {
-		return firstLists - 1
-	}
-	return firstLists
-}
 
 // boxHint and boxTail are what the format's box shows right of the format:
 // the hint of the mode, then the preset and "tab ›".
@@ -65,7 +45,7 @@ func (m tuiModel) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	mouse := msg.Mouse()
-	x, y := mouse.X, mouse.Y-m.frameTop()
+	x, y := mouse.X, mouse.Y
 	m.notice = ""
 
 	switch msg := msg.(type) {
@@ -87,9 +67,9 @@ func (m tuiModel) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.toggleView()
 		case y == rowFormat:
 			m.clickFormat(x)
-		case y >= m.listTop() && y < m.listTop()+m.listHeight():
+		case y >= listTop && y < listTop+m.listHeight():
 			win := m.window()
-			i := y - m.listTop() - btoi(win.up)
+			i := y - listTop - btoi(win.up)
 			switch {
 			case i < 0:
 				m.page(-1) // the line of those above

@@ -5,6 +5,27 @@
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
   a directory: h folds it, l opens it
   ▸ ~/card/  10 · 1 numbered                                                                        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   10 to rename · 1 numbered
 
   i edit format • tab preset • j/k move • h/l fold • v list • enter rename… • ctrl+s save • q quit
@@ -28,13 +49,13 @@ L6 0-4 bg=#dbe4ff faint
 L6 4-13 fg=c4 bg=#dbe4ff
 L6 13-18 bg=#dbe4ff faint
 L6 18-100 fg=c3 bg=#dbe4ff
-L7 15-16 faint
-L7 17-27 fg=c3
-L9 4-17 faint
-L9 22-30 faint
-L9 35-41 faint
-L9 46-52 faint
-L9 55-61 faint
-L9 68-77 faint
-L9 85-91 faint
-L9 94-98 faint
+L28 15-16 faint
+L28 17-27 fg=c3
+L30 4-17 faint
+L30 22-30 faint
+L30 35-41 faint
+L30 46-52 faint
+L30 55-61 faint
+L30 68-77 faint
+L30 85-91 faint
+L30 94-98 faint

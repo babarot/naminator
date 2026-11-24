@@ -311,6 +311,7 @@ func runMain() error {
 	}
 
 	model := newModel(first, cancel)
+	model.awaitReply = true
 	if title := model.startCompact(); title != "" {
 		fmt.Println(title)
 	}
@@ -382,23 +383,46 @@ func (c CLI) runWork(work func()) error {
 // have ended. A signal reaches p as interruptMsg, as Ctrl+C does; a failure
 // of p stops the work.
 func (c CLI) runProgram(p *tea.Program, work func()) (tea.Model, error) {
+	// A signal stops the run as Ctrl+C does, from before the work starts
+	// until this returns: the work can end long before p, as the reading
+	// under the screen does. It also cancels the run, so that a signal as
+	// p ends starts no next program. After the first, the default handling
+	// is back, so a second one ends the process at once.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sig)
+	interrupted := func() {
+		if c.cancel != nil {
+			c.cancel()
+		}
+	}
+	ran := make(chan struct{})
+	forwarded := make(chan struct{})
+	go func() {
+		defer close(forwarded)
+		select {
+		case <-sig:
+			signal.Stop(sig)
+			interrupted()
+			p.Send(interruptMsg{})
+		case <-ran:
+		}
+	}()
+	defer func() {
+		close(ran)
+		<-forwarded
+		// a signal that came as p ended, before it was forwarded
+		select {
+		case <-sig:
+			interrupted()
+		default:
+		}
+	}()
+
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		work()
-	}()
-	// A signal stops the run as Ctrl+C does. After the first, the default
-	// handling is back, so a second one ends the process at once.
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sig)
-	go func() {
-		select {
-		case <-sig:
-			signal.Stop(sig)
-			p.Send(interruptMsg{})
-		case <-done:
-		}
 	}()
 	final, err := p.Run()
 	if err != nil {

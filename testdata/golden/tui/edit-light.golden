@@ -10,6 +10,22 @@
   · card/DSC00003.JPG  → ?
   · card/DSC00004.JPG  → ?
   · card/DSC00005.JPG  → ?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   fix the format to see the new paths
 
   esc/enter done • tab preset • ←/→ cursor • ↑/↓ move • ctrl+t tree • ctrl+s save
@@ -42,10 +58,10 @@ L10 2-3 faint
 L10 23-26 faint
 L11 2-3 faint
 L11 23-26 faint
-L12 2-37 fg=c1
-L14 12-18 faint
-L14 23-31 faint
-L14 36-44 faint
-L14 49-55 faint
-L14 63-69 faint
-L14 77-81 faint
+L28 2-37 fg=c1
+L30 12-18 faint
+L30 23-31 faint
+L30 36-44 faint
+L30 49-55 faint
+L30 63-69 faint
+L30 77-81 faint

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -213,5 +214,51 @@ func TestPlainSender(t *testing.T) {
 	}, "\n")
 	if got != want {
 		t.Errorf("output:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// With awaitReply, the run quits once the terminal has answered where the
+// cursor is, or after the wait: answers to bubbletea's own queries would
+// otherwise reach the shell after a run that ends at once.
+func TestModelAwaitsReply(t *testing.T) {
+	var quits func(cmd tea.Cmd) bool
+	quits = func(cmd tea.Cmd) bool {
+		for cmd != nil {
+			msg := cmd()
+			switch msg := msg.(type) {
+			case tea.QuitMsg:
+				return true
+			case tea.BatchMsg:
+				return slices.ContainsFunc(msg, quits)
+			default:
+				return false
+			}
+		}
+		return false
+	}
+	for _, reply := range []tea.Msg{tea.CursorPositionMsg{}, repliedMsg{}} {
+		m := newTestModel(phaseStartMsg{kind: phaseRename, keys: photoKeys(1)}, 30)
+		m.printing = false
+		m.awaitReply = true
+		step := func(msg tea.Msg) tea.Cmd {
+			next, cmd := m.Update(msg)
+			nm, ok := next.(model)
+			if !ok {
+				t.Fatalf("Update returned %T", next)
+			}
+			*m = nm
+			return cmd
+		}
+		cmd := step(finishMsg{})
+		// what was queued is printed first
+		for !quits(cmd) && m.printing {
+			cmd = step(printedMsg{})
+		}
+		if quits(cmd) {
+			t.Fatalf("%T: quit before the terminal answered", reply)
+		}
+		if cmd = step(reply); !quits(cmd) {
+			t.Errorf("%T: did not quit once answered", reply)
+		}
 	}
 }

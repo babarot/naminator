@@ -63,8 +63,7 @@ func goldenTUI(t *testing.T, n int, dark bool) tuiModel {
 		}
 	}
 	m.dark = dark
-	m = m.send(t, readAll(photos)...)
-	return m.send(t, cursorWaitedMsg{})
+	return m.send(t, readAll(photos)...)
 }
 
 // moreLine returns the index of the first "⋯ N more files" line of the tree.
@@ -89,7 +88,7 @@ func TestGoldenTUI(t *testing.T) {
 		{"reading", 6, func(t *testing.T, m tuiModel) tuiModel {
 			fresh, photos := newTestTUI(t, 6)
 			fresh.dark = m.dark
-			return fresh.send(t, append(readAll(photos[:2]), cursorWaitedMsg{})...)
+			return fresh.send(t, readAll(photos[:2])...)
 		}},
 		{"list-cursor", 6, func(t *testing.T, m tuiModel) tuiModel { return m.send(t, keys("j", "j")...) }},
 		{"tree", 10, func(t *testing.T, m tuiModel) tuiModel { return m.send(t, keys("v")...) }},
@@ -110,13 +109,13 @@ func TestGoldenTUI(t *testing.T) {
 		{"no-shooting-time", 6, func(t *testing.T, m tuiModel) tuiModel {
 			fresh, photos := newTestTUI(t, 6)
 			fresh.dark = m.dark
-			msgs := append(readAll(photos[:5]), exifResultMsg{image: photos[5].Path, err: errNoShootingTime}, cursorWaitedMsg{})
+			msgs := append(readAll(photos[:5]), exifResultMsg{image: photos[5].Path, err: errNoShootingTime})
 			return fresh.send(t, append(msgs, keys("G")...)...)
 		}},
 		{"file-time", 6, func(t *testing.T, m tuiModel) tuiModel {
 			fresh, photos := newTestTUI(t, 6)
 			fresh.dark = m.dark
-			msgs := append(readAll(photos[:5]), exifResultMsg{image: photos[5].Path, err: errNoShootingTime}, cursorWaitedMsg{})
+			msgs := append(readAll(photos[:5]), exifResultMsg{image: photos[5].Path, err: errNoShootingTime})
 			return fresh.send(t, append(msgs, keys("G", "m")...)...)
 		}},
 	}

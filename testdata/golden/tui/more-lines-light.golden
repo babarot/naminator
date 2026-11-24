@@ -3,13 +3,29 @@
 ╭─ Format ─────────────────────────────────────────────────────────────────────────────────────────╮
 │ ~/{dir}/{date}_{time}                                               i edit  date and time  tab › │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-  {dir} card  {date} 2026-10-04  {time} 14-22-05  {ext} jpg  {camera} unknown  {orig} DSC00005
-     ↑ 5 more  (ctrl+u)
-  ~ card/DSC00005.JPG  → card/2026-10-04_14-22-05.jpg                                               
-  ~ card/DSC00006.JPG  → card/2026-10-04_14-22-06.jpg
-  ~ card/DSC00007.JPG  → card/2026-10-04_14-22-07.jpg
-  ~ card/DSC00008.JPG  → card/2026-10-04_14-22-08.jpg
-     ↓ 31 more  (ctrl+d)
+  {dir} card  {date} 2026-10-04  {time} 14-22-21  {ext} jpg  {camera} unknown  {orig} DSC00021
+     ↑ 19 more  (ctrl+u)
+  ~ card/DSC00019.JPG  → card/2026-10-04_14-22-19.jpg
+  ~ card/DSC00020.JPG  → card/2026-10-04_14-22-20.jpg
+  ~ card/DSC00021.JPG  → card/2026-10-04_14-22-21.jpg                                               
+  ~ card/DSC00022.JPG  → card/2026-10-04_14-22-22.jpg
+  ~ card/DSC00023.JPG  → card/2026-10-04_14-22-23.jpg
+  ~ card/DSC00024.JPG  → card/2026-10-04_14-22-24.jpg
+  ~ card/DSC00025.JPG  → card/2026-10-04_14-22-25.jpg
+  ~ card/DSC00026.JPG  → card/2026-10-04_14-22-26.jpg
+  ~ card/DSC00027.JPG  → card/2026-10-04_14-22-27.jpg
+  ~ card/DSC00028.JPG  → card/2026-10-04_14-22-28.jpg
+  ~ card/DSC00029.JPG  → card/2026-10-04_14-22-29.jpg
+  ~ card/DSC00030.JPG  → card/2026-10-04_14-22-30.jpg
+  ~ card/DSC00031.JPG  → card/2026-10-04_14-22-31.jpg
+  ~ card/DSC00032.JPG  → card/2026-10-04_14-22-32.jpg
+  ~ card/DSC00033.JPG  → card/2026-10-04_14-22-33.jpg
+  ~ card/DSC00034.JPG  → card/2026-10-04_14-22-34.jpg
+  ~ card/DSC00035.JPG  → card/2026-10-04_14-22-35.jpg
+  ~ card/DSC00036.JPG  → card/2026-10-04_14-22-36.jpg
+  ~ card/DSC00037.JPG  → card/2026-10-04_14-22-37.jpg
+  ~ card/DSC00038.JPG  → card/2026-10-04_14-22-38.jpg
+  ~ card/DSC00039.JPG  → card/2026-10-04_14-22-39.jpg
   40 to rename · 1 numbered
 
   i edit format • tab preset • j/k move • v tree • enter rename… • ctrl+s save • q quit
@@ -40,24 +56,57 @@ L5 61-69 fg=c5
 L5 70-77 faint
 L5 79-85 fg=c5
 L5 86-94 faint
-L6 5-23 faint
-L7 0-4 fg=c3 bg=#dbe4ff
-L7 4-23 bg=#dbe4ff
-L7 23-25 bg=#dbe4ff faint
-L7 25-100 bg=#dbe4ff
+L6 5-24 faint
+L7 2-3 fg=c3
+L7 23-24 faint
 L8 2-3 fg=c3
 L8 23-24 faint
-L9 2-3 fg=c3
-L9 23-24 faint
+L9 0-4 fg=c3 bg=#dbe4ff
+L9 4-23 bg=#dbe4ff
+L9 23-25 bg=#dbe4ff faint
+L9 25-100 bg=#dbe4ff
 L10 2-3 fg=c3
 L10 23-24 faint
-L11 5-24 faint
-L12 15-16 faint
-L12 17-27 fg=c3
-L14 4-17 faint
-L14 22-30 faint
-L14 35-41 faint
-L14 44-50 faint
-L14 57-66 faint
-L14 74-80 faint
-L14 83-87 faint
+L11 2-3 fg=c3
+L11 23-24 faint
+L12 2-3 fg=c3
+L12 23-24 faint
+L13 2-3 fg=c3
+L13 23-24 faint
+L14 2-3 fg=c3
+L14 23-24 faint
+L15 2-3 fg=c3
+L15 23-24 faint
+L16 2-3 fg=c3
+L16 23-24 faint
+L17 2-3 fg=c3
+L17 23-24 faint
+L18 2-3 fg=c3
+L18 23-24 faint
+L19 2-3 fg=c3
+L19 23-24 faint
+L20 2-3 fg=c3
+L20 23-24 faint
+L21 2-3 fg=c3
+L21 23-24 faint
+L22 2-3 fg=c3
+L22 23-24 faint
+L23 2-3 fg=c3
+L23 23-24 faint
+L24 2-3 fg=c3
+L24 23-24 faint
+L25 2-3 fg=c3
+L25 23-24 faint
+L26 2-3 fg=c3
+L26 23-24 faint
+L27 2-3 fg=c3
+L27 23-24 faint
+L28 15-16 faint
+L28 17-27 fg=c3
+L30 4-17 faint
+L30 22-30 faint
+L30 35-41 faint
+L30 44-50 faint
+L30 57-66 faint
+L30 74-80 faint
+L30 83-87 faint

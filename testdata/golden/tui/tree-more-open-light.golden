@@ -4,12 +4,28 @@
 │ ~/{dir}/{date}_{time}                                               i edit  date and time  tab › │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
   {dir} card  {date} 2026-10-04  {time} 14-22-05  {ext} jpg  {camera} unknown  {orig} DSC00005
-     ↑ 3 more  (ctrl+u)
+  ▾ ~/card/  10 · 1 numbered
+  ├─ 2026-10-04_14-22-00.jpg    ← card/DSC00000.JPG
+  ├─ 2026-10-04_14-22-01.jpg    ← card/DSC00001.JPG
   ├─ 2026-10-04_14-22-01_1.jpg  ← card/DSC00002.JPG  _1
   ├─ 2026-10-04_14-22-03.jpg    ← card/DSC00003.JPG
   ├─ 2026-10-04_14-22-04.jpg    ← card/DSC00004.JPG
   ├─ 2026-10-04_14-22-05.jpg    ← card/DSC00005.JPG                                                 
-     ↓ 4 more  (ctrl+d)
+  ├─ 2026-10-04_14-22-06.jpg    ← card/DSC00006.JPG
+  ├─ 2026-10-04_14-22-07.jpg    ← card/DSC00007.JPG
+  ├─ 2026-10-04_14-22-08.jpg    ← card/DSC00008.JPG
+  └─ 2026-10-04_14-22-09.jpg    ← card/DSC00009.JPG
+
+
+
+
+
+
+
+
+
+
+
   10 to rename · 1 numbered
 
   i edit format • tab preset • j/k move • h/l fold • v list • enter rename… • ctrl+s save • q quit
@@ -40,25 +56,39 @@ L5 61-69 fg=c5
 L5 70-77 faint
 L5 79-85 fg=c5
 L5 86-94 faint
-L6 5-23 faint
+L6 2-3 faint
+L6 4-11 fg=c4
+L6 13-17 faint
+L6 18-28 fg=c3
 L7 2-4 faint
 L7 32-51 faint
-L7 53-55 fg=c3
 L8 2-4 faint
 L8 32-51 faint
 L9 2-4 faint
 L9 32-51 faint
-L10 0-5 bg=#dbe4ff faint
-L10 5-32 bg=#dbe4ff
-L10 32-100 bg=#dbe4ff faint
-L11 5-23 faint
-L12 15-16 faint
-L12 17-27 fg=c3
-L14 4-17 faint
-L14 22-30 faint
-L14 35-41 faint
-L14 46-52 faint
-L14 55-61 faint
-L14 68-77 faint
-L14 85-91 faint
-L14 94-98 faint
+L9 53-55 fg=c3
+L10 2-4 faint
+L10 32-51 faint
+L11 2-4 faint
+L11 32-51 faint
+L12 0-5 bg=#dbe4ff faint
+L12 5-32 bg=#dbe4ff
+L12 32-100 bg=#dbe4ff faint
+L13 2-4 faint
+L13 32-51 faint
+L14 2-4 faint
+L14 32-51 faint
+L15 2-4 faint
+L15 32-51 faint
+L16 2-4 faint
+L16 32-51 faint
+L28 15-16 faint
+L28 17-27 fg=c3
+L30 4-17 faint
+L30 22-30 faint
+L30 35-41 faint
+L30 46-52 faint
+L30 55-61 faint
+L30 68-77 faint
+L30 85-91 faint
+L30 94-98 faint
