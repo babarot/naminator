@@ -1,0 +1,60 @@
+-- screen --
+ naminator  6 photos in card                                                     ⢄ reading EXIF 2/6
+╭─ Format ─────────────────────────────────────────────────────────────────────────────────────────╮
+│ ~/{dir}/{date}_{time}                                               i edit  date and time  tab › │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  {dir} card  {date} 2026-10-04  {time} 14-22-00  {ext} jpg  {camera} unknown  {orig} DSC00000
+  ~ card/DSC00000.JPG  → card/2026-10-04_14-22-00.jpg                                               
+  ~ card/DSC00001.JPG  → card/2026-10-04_14-22-01.jpg
+  · card/DSC00002.JPG  reading EXIF…
+  · card/DSC00003.JPG  reading EXIF…
+  · card/DSC00004.JPG  reading EXIF…
+  · card/DSC00005.JPG  reading EXIF…
+  4 reading · 2 to rename
+
+  i edit format • tab preset • j/k move • v tree • enter rename (after EXIF) • ctrl+s save • q quit
+-- styles --
+L1 1-10 bold
+L1 81-82 fg=c6
+L1 83-99 faint
+L2 0-2 faint
+L2 3-9 bold
+L2 10-100 faint
+L3 0-1 faint
+L3 2-4 fg=c4
+L3 4-9 fg=c5
+L3 9-10 bold
+L3 10-16 fg=c5
+L3 16-17 bold
+L3 17-23 fg=c5
+L3 70-100 faint
+L4 0-100 faint
+L5 2-7 fg=c5
+L5 8-12 faint
+L5 14-20 fg=c5
+L5 21-31 faint
+L5 33-39 fg=c5
+L5 40-48 faint
+L5 50-55 fg=c5
+L5 56-59 faint
+L5 61-69 fg=c5
+L5 70-77 faint
+L5 79-85 fg=c5
+L5 86-94 faint
+L6 0-4 fg=c3 bg=#dbe4ff
+L6 4-23 bg=#dbe4ff
+L6 23-25 bg=#dbe4ff faint
+L6 25-100 bg=#dbe4ff
+L7 2-3 fg=c3
+L7 23-24 faint
+L8 2-36 faint
+L9 2-36 faint
+L10 2-36 faint
+L11 2-36 faint
+L12 2-13 faint
+L14 4-17 faint
+L14 22-30 faint
+L14 35-41 faint
+L14 44-78 faint
+L14 86-92 faint
+L14 95-99 faint
