@@ -12,10 +12,9 @@ import (
 // Confirming and renaming stay on keys, and the mouse does nothing while
 // the screen asks y/N.
 
-// mouseOn reports whether the screen takes the mouse: while nothing is
-// asked.
+// mouseOn reports whether the screen takes the mouse.
 func (m tuiModel) mouseOn() bool {
-	return m.result == tuiRunning && !m.confirm && !m.tooLow()
+	return m.result == tuiRunning && m.uiState().takesMouse()
 }
 
 // The rows of the screen: the header, the format's box, the parts or what
@@ -29,7 +28,7 @@ const (
 // boxHint and boxTail are what the format's box shows right of the format:
 // the hint of the mode, then the preset and "tab ›".
 func (m tuiModel) boxHint() string {
-	if m.insert {
+	if m.uiState() == stateEdit {
 		return "editing  "
 	}
 	return "i edit  "
