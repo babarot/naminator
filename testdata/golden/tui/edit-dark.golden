@@ -1,0 +1,51 @@
+-- screen --
+ naminator  6 photos in card                                                             view: list
+╭─ Format ─────────────────────────────────────────────────────────────────────────────────────────╮
+│ {dir}/{date}_{time                                                        editing  custom  tab › │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  ✗ a placeholder is not closed: add }
+  · card/DSC00000.JPG  → ?                                                                          
+  · card/DSC00001.JPG  → ?
+  · card/DSC00002.JPG  → ?
+  · card/DSC00003.JPG  → ?
+  · card/DSC00004.JPG  → ?
+  · card/DSC00005.JPG  → ?
+  fix the format to see the new paths
+
+  esc/enter done • tab preset • ←/→ cursor • ↑/↓ move • ctrl+t tree • ctrl+s save
+-- styles --
+L1 1-10 bold
+L1 89-99 faint
+L2 0-2 fg=c5
+L2 3-9 fg=c5 bold
+L2 10-100 fg=c5
+L3 0-7 fg=c5
+L3 7-8 bold
+L3 8-14 fg=c5
+L3 14-15 bold
+L3 15-20 fg=c1
+L3 20-21 reverse
+L3 76-98 faint
+L3 99-100 fg=c5
+L4 0-100 fg=c5
+L5 2-38 fg=c1
+L6 0-4 bg=#222436 faint
+L6 4-23 bg=#222436
+L6 23-100 bg=#222436 faint
+L7 2-3 faint
+L7 23-26 faint
+L8 2-3 faint
+L8 23-26 faint
+L9 2-3 faint
+L9 23-26 faint
+L10 2-3 faint
+L10 23-26 faint
+L11 2-3 faint
+L11 23-26 faint
+L12 2-37 fg=c1
+L14 12-18 faint
+L14 23-31 faint
+L14 36-44 faint
+L14 49-55 faint
+L14 63-69 faint
+L14 77-81 faint

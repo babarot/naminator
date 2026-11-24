@@ -1,0 +1,25 @@
+-- screen --
+Reading EXIF of 20 photos
+
+  ⢄ IMG_0000.HEIC   0.0s  exiftool
+  ⢄ IMG_0003.HEIC   0.0s  exiftool
+  ⢄ IMG_0006.HEIC   0.0s  exiftool
+  ⢄ IMG_0009.HEIC   0.0s  exiftool
+  8 queued · 8 read
+
+  ━━━━━━━━━───────────────  8/20 photos  0.0s  · exiftool 4/4 · ctrl+c to cancel
+-- styles --
+L3 2-3 fg=c6
+L3 20-34 faint
+L4 2-3 fg=c6
+L4 20-34 faint
+L5 2-3 fg=c6
+L5 20-34 faint
+L6 2-3 fg=c6
+L6 20-34 faint
+L7 2-19 faint
+L9 2-11 fg=c6
+L9 11-26 faint
+L9 41-48 faint
+L9 49-61 fg=c3
+L9 62-80 faint

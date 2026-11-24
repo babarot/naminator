@@ -1,0 +1,53 @@
+-- screen --
+✗ Read EXIF of 5 photos in 0.0s, 1 failed
+
+  ✓ IMG_0000.HEIC   0.0s
+  ✓ IMG_0001.HEIC   0.0s
+  ✓ IMG_0002.HEIC   0.0s
+  ✗ IMG_0003.HEIC   0.0s  File format error
+  ✓ IMG_0004.HEIC   0.0s
+
+✓ Renamed 3 photos in 0.0s, 1 already named
+
+  ✓ IMG_0000.HEIC  already named
+  ✓ IMG_0001.HEIC  → /p/2026-10-03/2026-10-03_14-00-01.heic
+  ✓ IMG_0002.HEIC  → /p/2026-10-03/2026-10-03_14-00-02.heic
+  ✓ IMG_0004.HEIC  → /p/2026-10-03/2026-10-03_14-00-03.heic
+
+✓ Removed 1 empty directory in 0.0s, 1 kept
+
+  - /p/DCIM  removed (empty)
+  ✓ /p       kept (not empty)
+
+  IMG_0003.HEIC:
+    File format error
+-- styles --
+L1 0-1 fg=c1
+L1 33-41 fg=c1
+L3 2-3 fg=c2
+L3 4-24 faint
+L4 2-3 fg=c2
+L4 4-24 faint
+L5 2-3 fg=c2
+L5 4-24 faint
+L6 2-3 fg=c1
+L6 4-17 bold
+L6 20-43 faint
+L7 2-3 fg=c2
+L7 4-24 faint
+L9 0-1 fg=c2
+L11 2-3 fg=c2
+L11 4-32 faint
+L12 2-3 fg=c2
+L12 19-20 faint
+L13 2-3 fg=c2
+L13 19-20 faint
+L14 2-3 fg=c2
+L14 19-20 faint
+L16 0-1 fg=c2
+L18 2-3 fg=c1
+L18 13-28 fg=c1
+L19 2-3 fg=c2
+L19 4-29 faint
+L21 2-16 bold
+L22 4-21 faint
