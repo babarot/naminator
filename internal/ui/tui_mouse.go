@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"github.com/babarot/naminator/internal/ui/keymap"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -31,11 +33,11 @@ func (m tuiModel) boxHint() string {
 	if m.uiState() == stateEdit {
 		return "editing  "
 	}
-	return "i edit  "
+	return m.keys.Hint(keymap.List, keymap.Edit) + " edit  "
 }
 
 func (m tuiModel) boxTail() string {
-	return m.presetLabel() + "  tab ›"
+	return m.presetLabel() + "  " + m.keys.Hint(keymap.Screen, keymap.NextPreset) + " ›"
 }
 
 // mouse handles a click or a turn of the wheel.

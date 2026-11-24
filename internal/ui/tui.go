@@ -14,6 +14,7 @@ import (
 	"github.com/babarot/naminator/internal/config"
 	"github.com/babarot/naminator/internal/photo"
 	"github.com/babarot/naminator/internal/rename"
+	"github.com/babarot/naminator/internal/ui/keymap"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -105,6 +106,7 @@ type tuiModel struct {
 	cfgPath string
 	presets []rename.Preset
 	cancel  func()
+	keys    keymap.Map
 
 	rows   []*tuiRow
 	byKey  map[string]*tuiRow
@@ -146,7 +148,7 @@ func newTUIModel(args, images []string, format, destDir string, dry, clean bool,
 		width, height = w, h
 	}
 	m := tuiModel{
-		args: args, destDir: destDir, dry: dry, clean: clean, fs: fsys, cfgPath: cfgPath, presets: presets, cancel: cancel,
+		args: args, destDir: destDir, dry: dry, clean: clean, fs: fsys, cfgPath: cfgPath, presets: presets, cancel: cancel, keys: keymap.Default(),
 		byKey:    map[string]*tuiRow{},
 		folded:   map[string]bool{},
 		expanded: map[string]bool{},
@@ -324,61 +326,63 @@ func (m tuiModel) ready() (bool, string) {
 	return true, ""
 }
 
-// key handles a key: ctrl+c anywhere, then the keys of the state the screen
-// is in, so that a key never acts on what is under a question.
+// key handles a key: what it does is looked up for the state the screen is
+// in, so that a key never acts on what is under a question.
 func (m tuiModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.notice = ""
-	if msg.String() == "ctrl+c" {
+	state := m.uiState()
+	a := m.keys.Action(msg.String(), state.scopes()...)
+	if a == keymap.Interrupt {
 		return m.end(Canceled)
 	}
-	switch m.uiState() {
+	switch state {
 	case stateTooLow:
-		return m.tooLowKey(msg)
+		return m.tooLowKey(a)
 	case stateConfirm:
-		return m.confirmKey(msg)
+		return m.confirmKey(a)
 	case stateEdit:
-		return m.editKey(msg)
+		return m.editKey(a, msg)
 	case stateList, stateTree:
-		return m.listKey(msg)
+		return m.listKey(a)
 	}
 	return m, nil
 }
 
 // tooLowKey handles a key when the screen is not drawn: nothing that cannot
 // be seen is done.
-func (m tuiModel) tooLowKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if msg.String() == "q" {
+func (m tuiModel) tooLowKey(a keymap.Action) (tea.Model, tea.Cmd) {
+	if a == keymap.Quit {
 		return m.end(Quit)
 	}
 	return m, nil
 }
 
 // confirmKey handles the answer to y/N: anything but y is no.
-func (m tuiModel) confirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m tuiModel) confirmKey(a keymap.Action) (tea.Model, tea.Cmd) {
 	m.confirm = false
-	if msg.String() == "y" {
+	if a == keymap.Yes {
 		return m.end(Confirmed)
 	}
 	return m, nil
 }
 
-// commonKey handles the keys that work both in the list and the tree and
+// screenKey handles the keys that work both in the list and the tree and
 // while the format is edited, and reports whether it was one of them.
-func (m *tuiModel) commonKey(k string) bool {
-	switch k {
-	case "tab", "shift+tab":
-		m.cyclePreset(k == "tab")
-	case "up":
+func (m *tuiModel) screenKey(a keymap.Action) bool {
+	switch a {
+	case keymap.NextPreset, keymap.PrevPreset:
+		m.cyclePreset(a == keymap.NextPreset)
+	case keymap.Up:
 		m.sel = max(0, m.sel-1)
-	case "down":
+	case keymap.Down:
 		m.sel = min(len(m.items())-1, m.sel+1)
-	case "pgup":
+	case keymap.PageUp:
 		m.page(-1)
-	case "pgdown":
+	case keymap.PageDown:
 		m.page(1)
-	case "ctrl+t":
+	case keymap.ToggleView:
 		m.toggleView()
-	case "ctrl+s":
+	case keymap.SaveFormat:
 		m.save()
 	default:
 		return false
@@ -386,31 +390,31 @@ func (m *tuiModel) commonKey(k string) bool {
 	return true
 }
 
-// editKey handles a key while the format is edited.
-func (m tuiModel) editKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	k := msg.String()
-	if m.commonKey(k) {
+// editKey handles a key while the format is edited: one that is not bound
+// is typed.
+func (m tuiModel) editKey(a keymap.Action, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.screenKey(a) {
 		return m, nil
 	}
 	r := []rune(m.format)
-	switch k {
-	case "esc", "enter":
+	switch a {
+	case keymap.Done:
 		m.insert = false
-	case "left":
+	case keymap.CursorLeft:
 		m.cursor = max(0, m.cursor-1)
-	case "right":
+	case keymap.CursorRight:
 		m.cursor = min(len(r), m.cursor+1)
-	case "home", "ctrl+a":
+	case keymap.CursorStart:
 		m.cursor = 0
-	case "end", "ctrl+e":
+	case keymap.CursorEnd:
 		m.cursor = len(r)
-	case "backspace":
+	case keymap.DeleteBack:
 		if m.cursor > 0 {
 			m.format = string(r[:m.cursor-1]) + string(r[m.cursor:])
 			m.cursor--
 			m.plan()
 		}
-	default:
+	case keymap.None:
 		if t := msg.Text; t != "" && msg.Mod == 0 || msg.Mod == tea.ModShift && t != "" {
 			m.format = string(r[:m.cursor]) + t + string(r[m.cursor:])
 			m.cursor += len([]rune(t))
@@ -421,41 +425,30 @@ func (m tuiModel) editKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // listKey handles a key in the list or the tree.
-func (m tuiModel) listKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	k := msg.String()
-	if m.commonKey(k) {
+func (m tuiModel) listKey(a keymap.Action) (tea.Model, tea.Cmd) {
+	if m.screenKey(a) {
 		return m, nil
 	}
-	switch k {
-	case "i":
+	switch a {
+	case keymap.Edit:
 		m.insert = true
-	case "a":
+	case keymap.Append:
 		m.insert, m.cursor = true, len([]rune(m.format))
-	case "j":
-		m.sel = min(len(m.items())-1, m.sel+1)
-	case "k":
-		m.sel = max(0, m.sel-1)
-	case "ctrl+u":
-		m.page(-1)
-	case "ctrl+d":
-		m.page(1)
-	case "g":
+	case keymap.Top:
 		m.sel = 0
-	case "G":
+	case keymap.Bottom:
 		m.sel = len(m.items()) - 1
-	case "h", "left":
+	case keymap.Fold:
 		m.fold(false)
-	case "l", "right":
+	case keymap.Unfold:
 		m.fold(true)
-	case "v":
-		m.toggleView()
-	case "m":
+	case keymap.FileTime:
 		m.toggleFileTime()
-	case "enter":
+	case keymap.Rename:
 		if ok, _ := m.ready(); ok {
 			m.confirm = true
 		}
-	case "q":
+	case keymap.Quit:
 		return m.end(Quit)
 	}
 	return m, nil
@@ -691,7 +684,7 @@ func (m tuiModel) lines(now time.Time) []string {
 	items := m.items()
 	win := m.window()
 	if win.up {
-		lines = append(lines, fitLine("     "+Dim.Render(fmt.Sprintf("↑ %d more  (ctrl+u)", win.top)), w))
+		lines = append(lines, fitLine("     "+Dim.Render(fmt.Sprintf("↑ %d more  (%s)", win.top, m.keys.Hint(keymap.List, keymap.PageUp))), w))
 	}
 	for j := win.top; j < win.top+win.rows; j++ {
 		if j == m.sel && styled {
@@ -701,7 +694,7 @@ func (m tuiModel) lines(now time.Time) []string {
 		}
 	}
 	if win.down {
-		lines = append(lines, fitLine("     "+Dim.Render(fmt.Sprintf("↓ %d more  (ctrl+d)", len(items)-win.top-win.rows)), w))
+		lines = append(lines, fitLine("     "+Dim.Render(fmt.Sprintf("↓ %d more  (%s)", len(items)-win.top-win.rows, m.keys.Hint(keymap.List, keymap.PageDown))), w))
 	}
 	// the counts and the keys stay at the bottom of the screen
 	for range m.listHeight() - win.rows - btoi(win.up) - btoi(win.down) {
@@ -805,11 +798,11 @@ func (m tuiModel) partsLine() string {
 	r := m.selected()
 	switch {
 	case r == nil:
-		return "  " + Dim.Render("a directory: h folds it, l opens it")
+		return "  " + Dim.Render(fmt.Sprintf("a directory: %s folds it, %s opens it", m.keys.Hint(keymap.List, keymap.Fold), m.keys.Hint(keymap.List, keymap.Unfold)))
 	case !r.read:
 		return "  " + Dim.Render("reading EXIF of the selected photo…")
 	case r.skipped():
-		return "  " + Dim.Render("no shooting time in its EXIF: it is skipped (m uses the file's time)")
+		return "  " + Dim.Render(fmt.Sprintf("no shooting time in its EXIF: it is skipped (%s uses the file's time)", m.keys.Hint(keymap.List, keymap.FileTime)))
 	case m.namer == nil:
 		return ""
 	}
@@ -935,25 +928,14 @@ func (m tuiModel) countFileTime() int {
 
 // help lists the keys of the mode, or asks to confirm.
 func (m tuiModel) help() string {
-	switch m.uiState() {
-	case stateTooLow:
-		return fmt.Sprintf("naminator needs a terminal of %d lines or more (q quits)", minHeight)
-	case stateConfirm:
-		return m.confirmHelp()
-	case stateEdit:
-		return joinKeys(keyHint("esc/enter", "done"), keyHint("tab", "preset"), keyHint("←/→", "cursor"), keyHint("↑/↓", "move"), keyHint("ctrl+t", "tree"), keyHint("ctrl+s", "save"))
-	case stateList:
-		return m.listHelp(keyHint("v", "tree"))
-	case stateTree:
-		return m.listHelp(keyHint("h/l", "fold"), keyHint("v", "list"))
+	if m.uiState() == stateTooLow {
+		return fmt.Sprintf("naminator needs a terminal of %d lines or more (%s quits)", minHeight, m.keys.Hint(keymap.TooLow, keymap.Quit))
 	}
-	return ""
+	if m.uiState() == stateConfirm {
+		return m.confirmHelp()
+	}
+	return keyLine(m.hints(), m.width-2)
 }
-
-// keyHint is a key of the key line and what it does.
-func keyHint(k, what string) string { return k + Dim.Render(" "+what) }
-
-func joinKeys(keys ...string) string { return strings.Join(keys, Dim.Render(" • ")) }
 
 // confirmHelp asks whether to rename.
 func (m tuiModel) confirmHelp() string {
@@ -962,29 +944,86 @@ func (m tuiModel) confirmHelp() string {
 	if m.dry {
 		what = fmt.Sprintf("Try renaming %d %s (dry run)?", n, plural(n, "photo", "photos"))
 	}
-	return Yellow.Render(what) + " " + Bold.Render("y") + Dim.Render("/") + Bold.Render("N")
+	return Yellow.Render(what) + " " + Bold.Render(m.keys.Hint(keymap.Confirm, keymap.Yes)) + Dim.Render("/") + Bold.Render("N")
 }
 
-// listHelp is the key line of the list or the tree, with the keys of the
-// view.
-func (m tuiModel) listHelp(view ...string) string {
-	enter := keyHint("enter", "rename…")
-	if m.dry {
-		enter = keyHint("enter", "dry run…")
+// hint is a key of the key line and what it does.
+type hint struct {
+	key, what string
+	// keep is for those that stay on a narrow terminal, and off for one
+	// that does nothing now
+	keep, off bool
+}
+
+// hints are the keys that work in the list, the tree and while the format
+// is edited.
+func (m tuiModel) hints() []hint {
+	k := func(scope keymap.Scope, what string, actions ...keymap.Action) hint {
+		return hint{key: m.keys.Hint(scope, actions...), what: what}
 	}
-	if ok, why := m.ready(); !ok {
-		enter = Dim.Render("enter rename (" + why + ")")
+	switch m.uiState() {
+	case stateEdit:
+		return []hint{
+			{key: m.keys.HintAll(keymap.Editing, keymap.Done), what: "done", keep: true},
+			k(keymap.Screen, "preset", keymap.NextPreset),
+			k(keymap.Editing, "cursor", keymap.CursorLeft, keymap.CursorRight),
+			k(keymap.Screen, "move", keymap.Up, keymap.Down),
+			k(keymap.Screen, "tree", keymap.ToggleView),
+			k(keymap.Screen, "save", keymap.SaveFormat),
+		}
+	case stateList, stateTree:
+		hints := []hint{
+			k(keymap.List, "edit format", keymap.Edit),
+			k(keymap.Screen, "preset", keymap.NextPreset),
+			k(keymap.List, "move", keymap.Down, keymap.Up),
+		}
+		if m.uiState() == stateTree {
+			hints = append(hints, k(keymap.List, "fold", keymap.Fold, keymap.Unfold), k(keymap.List, "list", keymap.ToggleView))
+		} else {
+			hints = append(hints, k(keymap.List, "tree", keymap.ToggleView))
+		}
+		if r := m.selected(); r != nil && r.read && r.err != "" {
+			hints = append(hints, k(keymap.List, "file time", keymap.FileTime))
+		}
+		rename := k(keymap.List, "rename…", keymap.Rename)
+		rename.keep = true
+		if m.dry {
+			rename.what = "dry run…"
+		}
+		if ok, why := m.ready(); !ok {
+			rename.what, rename.off = "rename ("+why+")", true
+		}
+		quit := k(keymap.List, "quit", keymap.Quit)
+		quit.keep = true
+		return append(hints, rename, k(keymap.Screen, "save", keymap.SaveFormat), quit)
 	}
-	keys := append([]string{keyHint("i", "edit format"), keyHint("tab", "preset"), keyHint("j/k", "move")}, view...)
-	if r := m.selected(); r != nil && r.read && r.err != "" {
-		keys = append(keys, keyHint("m", "file time"))
+	return nil
+}
+
+// keyLine draws hints in width, leaving out from the end those that do not
+// fit and need not stay.
+func keyLine(hints []hint, width int) string {
+	draw := func() string {
+		keys := make([]string, len(hints))
+		for i, h := range hints {
+			keys[i] = h.key + Dim.Render(" "+h.what)
+			if h.off {
+				keys[i] = Dim.Render(h.key + " " + h.what)
+			}
+		}
+		return strings.Join(keys, Dim.Render(" • "))
 	}
-	keys = append(keys, enter, keyHint("ctrl+s", "save"), keyHint("q", "quit"))
-	// on a narrow terminal, leave out ctrl+s, which is shown last otherwise
-	if line := joinKeys(keys...); ansi.StringWidth(line) > m.width-2 {
-		keys = slices.DeleteFunc(keys, func(k string) bool { return strings.HasPrefix(k, "ctrl+s") })
+	for ansi.StringWidth(draw()) > width {
+		i := len(hints) - 1
+		for i >= 0 && hints[i].keep {
+			i--
+		}
+		if i < 0 {
+			break
+		}
+		hints = slices.Delete(hints, i, i+1)
 	}
-	return joinKeys(keys...)
+	return draw()
 }
 
 // spread puts left and right on one line of width cells.

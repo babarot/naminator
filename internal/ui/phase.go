@@ -9,6 +9,7 @@ import (
 
 	"github.com/babarot/naminator/internal/photo"
 	"github.com/babarot/naminator/internal/rename"
+	"github.com/babarot/naminator/internal/ui/keymap"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -471,7 +472,7 @@ func (p *phase) fullView(over bool, spin string, now time.Time, width int) []str
 		lines = append(lines, p.row(it, spin, now, width))
 	}
 	if !over {
-		lines = append(lines, "", "  "+Dim.Render("ctrl+c to cancel"))
+		lines = append(lines, "", "  "+Dim.Render(cancelHint()))
 	}
 	return lines
 }
@@ -545,7 +546,7 @@ func (p *phase) compactView(spin string, now time.Time, width, height int) []str
 	}
 	done, total := p.progress()
 	line := fmt.Sprintf("  %s  %d/%d %s  %s", progressBar(done, total, progressBarWidth), done, total, p.unit(), Dim.Render(formatSeconds(now.Sub(p.start))))
-	more := append(p.gauge(), Dim.Render("ctrl+c to cancel"))
+	more := append(p.gauge(), Dim.Render(cancelHint()))
 	lines = append(lines, fitLine(line+Dim.Render("  · ")+joinDim(more), width))
 	return lines
 }
@@ -601,4 +602,9 @@ func plural(n int, one, many string) string {
 		return one
 	}
 	return many
+}
+
+// cancelHint tells how to stop the run.
+func cancelHint() string {
+	return keymap.Default().Hint(keymap.Anywhere, keymap.Interrupt) + " to cancel"
 }
