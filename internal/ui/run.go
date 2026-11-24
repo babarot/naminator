@@ -1,4 +1,7 @@
-package main
+// Package ui is what naminator draws: the interactive screen (Screen) and
+// the display of a run (Run). The work tells them what it does (Tracker);
+// they move nothing.
+package ui
 
 import (
 	"fmt"

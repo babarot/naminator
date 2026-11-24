@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -24,7 +25,9 @@ var layers = []layer{
 	{"internal/photo", 0, nil, []string{"github.com/barasher/go-exiftool", "github.com/gabriel-vasile/mimetype"}, "Photos: their EXIF data, read with exiftool, and the files that are photos"},
 	{"internal/rename", 1, []string{"internal/photo"}, nil, "Where photos go: templates, paths no two photos share, sidecars, and the directories left empty"},
 	{"internal/config", 2, []string{"internal/rename"}, []string{"github.com/goccy/go-yaml"}, "The configuration file"},
-	{"", 3, []string{"internal/config", "internal/photo", "internal/rename"}, []string{"charm.land/bubbles/v2", "charm.land/bubbletea/v2", "charm.land/lipgloss/v2", "github.com/charmbracelet/x/ansi", "github.com/jessevdk/go-flags", "github.com/mattn/go-isatty", "github.com/nxadm/tail", "golang.org/x/sys", "golang.org/x/term"}, "The flags, the interactive screen, the run and its display"},
+	{"internal/ui", 3, []string{"internal/config", "internal/photo", "internal/rename"}, []string{"charm.land/bubbles/v2", "charm.land/bubbletea/v2", "charm.land/lipgloss/v2", "github.com/charmbracelet/x/ansi", "github.com/mattn/go-isatty", "golang.org/x/sys", "golang.org/x/term"}, "The interactive screen and the display of a run"},
+	{"internal/cli", 4, []string{"internal/config", "internal/photo", "internal/rename", "internal/ui"}, []string{"github.com/jessevdk/go-flags", "github.com/mattn/go-isatty", "github.com/nxadm/tail"}, "The command line: the flags, the workers, and moving the files"},
+	{"", 5, []string{"internal/cli"}, nil, "Calls cli.Main with the version"},
 }
 
 // layer is a package's place: its layer, the packages of this module
@@ -162,6 +165,8 @@ func pkgName(pkg string) string {
 	return pkg
 }
 
+var update = flag.Bool("update", false, "rewrite the layer table in docs/architecture.md")
+
 const (
 	docPath  = "docs/architecture.md"
 	docStart = "<!-- layers:start -->"
@@ -207,7 +212,7 @@ func TestArchitectureDoc(t *testing.T) {
 	if got == want {
 		return
 	}
-	if *updateGolden {
+	if *update {
 		if err := os.WriteFile(docPath, []byte(doc[:start]+want+doc[end+len(docEnd):]), 0o644); err != nil {
 			t.Fatal(err)
 		}

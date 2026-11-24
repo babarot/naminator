@@ -1,4 +1,4 @@
-package main
+package ui
 
 import (
 	tea "charm.land/bubbletea/v2"

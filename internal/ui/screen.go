@@ -1,4 +1,4 @@
-package main
+package ui
 
 import (
 	"os"
@@ -47,16 +47,16 @@ func NewScreen(o ScreenOptions) *Screen {
 }
 
 // Do runs the screen while work runs, and returns what was decided.
-func (s *Screen) Do(work func()) (tuiDecision, error) {
+func (s *Screen) Do(work func()) (Decision, error) {
 	final, err := runProgram(s.p, s.cancel, work)
 	if err != nil {
-		return tuiDecision{}, err
+		return Decision{}, err
 	}
 	m, _ := final.(tuiModel)
 	return m.decision(), nil
 }
 
 // FormatLine is the line that tells the format decided, above the run.
-func FormatLine(d tuiDecision) string {
+func FormatLine(d Decision) string {
 	return Dim.Render("Format: ") + Blue.Render(d.Base) + d.Format
 }

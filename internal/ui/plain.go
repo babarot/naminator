@@ -1,4 +1,4 @@
-package main
+package ui
 
 import (
 	"fmt"
@@ -16,7 +16,7 @@ type plainSender struct {
 	mu       sync.Mutex
 	w        io.Writer
 	phase    *phase
-	failures []failure
+	failures []Failure
 	now      func() time.Time
 }
 

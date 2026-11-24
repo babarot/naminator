@@ -1,4 +1,4 @@
-package main
+package ui
 
 import (
 	"fmt"
@@ -29,19 +29,19 @@ import (
 // insert (i), where they edit the format. Enter in insert mode only leaves
 // it, so that a rename never starts while typing.
 
-// tuiResult is how the screen ended.
-type tuiResult int
+// Result is how the screen ended.
+type Result int
 
 const (
-	tuiRunning   tuiResult = iota
-	tuiConfirmed           // rename with the format
-	tuiQuit                // q: nothing renamed
-	tuiCanceled            // Ctrl+C or a signal: nothing renamed
+	tuiRunning Result = iota
+	Confirmed         // rename with the format
+	Quit              // q: nothing renamed
+	Canceled          // Ctrl+C or a signal: nothing renamed
 )
 
-// tuiDecision is what the screen decided.
-type tuiDecision struct {
-	Result tuiResult
+// Decision is what the screen decided.
+type Decision struct {
+	Result Result
 	// Format is the format to rename with, under Base, when confirmed.
 	Format string
 	Base   string
@@ -52,7 +52,7 @@ type tuiDecision struct {
 	// so that the photos go where they were shown to go.
 	Targets map[string]string
 	// Failed are the photos whose EXIF data could not be read, to report.
-	Failed []failure
+	Failed []Failure
 }
 
 type tuiView int
@@ -137,7 +137,7 @@ type tuiModel struct {
 	width   int
 	height  int
 	spinner spinner.Model
-	result  tuiResult
+	result  Result
 }
 
 func newTUIModel(args, images []string, format, destDir string, dry, clean bool, presets []rename.Preset, fsys rename.FileSystem, cfgPath string, cancel func()) tuiModel {
@@ -267,7 +267,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case interruptMsg:
-		return m.end(tuiCanceled)
+		return m.end(Canceled)
 
 	case tea.KeyPressMsg:
 		return m.key(msg)
@@ -286,24 +286,24 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // end closes the screen with r. Unless confirmed, the EXIF reading stops.
 // What was decided is read from the final model (decision), and the run
 // is another program.
-func (m tuiModel) end(r tuiResult) (tea.Model, tea.Cmd) {
+func (m tuiModel) end(r Result) (tea.Model, tea.Cmd) {
 	m.result = r
-	if r != tuiConfirmed && m.cancel != nil {
+	if r != Confirmed && m.cancel != nil {
 		m.cancel()
 	}
 	return m, tea.Quit
 }
 
 // decision is what the screen decided.
-func (m tuiModel) decision() tuiDecision {
-	d := tuiDecision{Result: m.result, Format: m.format, Base: m.base(), Photos: m.photos(), Targets: map[string]string{}}
+func (m tuiModel) decision() Decision {
+	d := Decision{Result: m.result, Format: m.format, Base: m.base(), Photos: m.photos(), Targets: map[string]string{}}
 	photo.SortByTime(d.Photos)
 	for _, row := range m.rows {
 		if row.usable() && row.target != "" {
 			d.Targets[row.photo.Path] = row.target
 		}
 		if row.skipped() {
-			d.Failed = append(d.Failed, failure{name: filepath.Base(row.key), err: row.err})
+			d.Failed = append(d.Failed, Failure{Name: filepath.Base(row.key), Err: row.err})
 		}
 	}
 	return d
@@ -328,12 +328,12 @@ func (m tuiModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
 	m.notice = ""
 	if k == "ctrl+c" {
-		return m.end(tuiCanceled)
+		return m.end(Canceled)
 	}
 	if m.confirm {
 		m.confirm = false
 		if k == "y" {
-			return m.end(tuiConfirmed)
+			return m.end(Confirmed)
 		}
 		return m, nil
 	}
@@ -419,7 +419,7 @@ func (m tuiModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.confirm = true
 		}
 	case "q":
-		return m.end(tuiQuit)
+		return m.end(Quit)
 	}
 	return m, nil
 }

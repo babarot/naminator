@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"errors"
@@ -7,6 +7,7 @@ import (
 
 	"github.com/babarot/naminator/internal/config"
 	"github.com/babarot/naminator/internal/rename"
+	"github.com/babarot/naminator/internal/ui"
 )
 
 // interactive reports whether the run opens the interactive screen: in a
@@ -71,7 +72,7 @@ func onlyFiles(args []string) bool {
 // runInteractive runs the interactive screen while the EXIF data is read.
 // Once confirmed, the screen ends, and the photos are renamed as decided
 // (runDecided).
-func (c CLI) runInteractive(screen *Screen) error {
+func (c CLI) runInteractive(screen *ui.Screen) error {
 	c.tracker = screen
 	// The screen ends once decided, and the EXIF data is all read before
 	// it can be confirmed: the work is the reading only.
@@ -80,10 +81,10 @@ func (c CLI) runInteractive(screen *Screen) error {
 		return err
 	}
 	switch {
-	case d.Result == tuiQuit:
+	case d.Result == ui.Quit:
 		// q also cancels, to stop the reading: quitting is not canceling
 		return nil
-	case d.Result != tuiConfirmed || c.isCanceled():
+	case d.Result != ui.Confirmed || c.isCanceled():
 		return errCanceled
 	}
 	return c.runDecided(d)
@@ -91,7 +92,7 @@ func (c CLI) runInteractive(screen *Screen) error {
 
 // runDecided renames the photos as the screen decided, with the display of
 // a run in the shell's scrollback.
-func (c CLI) runDecided(d tuiDecision) error {
+func (c CLI) runDecided(d ui.Decision) error {
 	tpl, err := rename.ParseTemplate(d.Format)
 	if err != nil {
 		return err
@@ -101,13 +102,13 @@ func (c CLI) runDecided(d tuiDecision) error {
 	c.planned = d.Targets
 	c.logger.Debug("format chosen", "format", d.Format)
 
-	fmt.Println(FormatLine(d))
-	display := NewRun(RenamePhase(d.Photos, c.base, c.into, c.opt.Dryrun), c.cancel)
+	fmt.Println(ui.FormatLine(d))
+	display := ui.NewRun(ui.RenamePhase(d.Photos, c.base, c.into, c.opt.Dryrun), c.cancel)
 	c.tracker = display
 	return c.runWork(display, func() {
 		// The photos the screen could not read are reported at the end
 		for _, f := range d.Failed {
-			c.tracker.Warn(f.name, f.err)
+			c.tracker.Warn(f.Name, f.Err)
 		}
 		c.renameAll(d.Photos, false)
 		c.finish()

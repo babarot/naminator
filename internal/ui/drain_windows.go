@@ -1,11 +1,11 @@
-//go:build darwin || dragonfly || freebsd || netbsd || openbsd
+//go:build windows
 
-package main
+package ui
 
 import (
 	"os"
 
-	"golang.org/x/sys/unix"
+	"golang.org/x/sys/windows"
 )
 
 // drainStdinAfterBubbletea flushes pending terminal input that leaks as
@@ -39,6 +39,5 @@ func drainStdinAfterBubbletea() {
 	if f == nil {
 		return
 	}
-	// TIOCFLUSH with flag 1 (FREAD) discards data received but not yet read.
-	_ = unix.IoctlSetPointerInt(int(f.Fd()), unix.TIOCFLUSH, 1)
+	_ = windows.FlushConsoleInputBuffer(windows.Handle(f.Fd()))
 }

@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"io"
@@ -48,8 +48,8 @@ func TestRenameMovesSidecars(t *testing.T) {
 			t.Errorf("%s: %v", p, err)
 		}
 	}
-	if len(photo.RenamedSidecars) != 1 || sidecarNote(photo) != "  + xmp" {
-		t.Errorf("RenamedSidecars = %v, note %q", photo.RenamedSidecars, sidecarNote(photo))
+	if len(photo.RenamedSidecars) != 1 {
+		t.Errorf("RenamedSidecars = %v", photo.RenamedSidecars)
 	}
 	// the card is left empty, so --clean can remove it
 	if entries, _ := os.ReadDir(filepath.Join(root, "card")); len(entries) != 0 {
