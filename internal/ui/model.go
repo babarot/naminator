@@ -1,4 +1,4 @@
-package main
+package ui
 
 import (
 	"os"
@@ -22,7 +22,7 @@ import (
 // full and the view is left empty.
 type model struct {
 	phase    *phase
-	failures []failure
+	failures []Failure
 	spinner  spinner.Model
 	width    int
 	height   int // 0 when unknown

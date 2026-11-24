@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"errors"
@@ -7,39 +7,15 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/babarot/naminator/internal/photo"
 	"github.com/babarot/naminator/internal/rename"
-
-	tea "charm.land/bubbletea/v2"
 )
-
-func TestDurationString(t *testing.T) {
-	tests := []struct {
-		name string
-		d    duration
-		want string
-	}{
-		{"zero", duration(0), "0.00s"},
-		{"one second", duration(time.Second), "1.00s"},
-		{"half second", duration(500 * time.Millisecond), "0.50s"},
-		{"2.5 seconds", duration(2500 * time.Millisecond), "2.50s"},
-		{"sub-millisecond", duration(100 * time.Microsecond), "0.00s"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.d.String()
-			if got != tt.want {
-				t.Errorf("duration(%v).String() = %q, want %q", time.Duration(tt.d), got, tt.want)
-			}
-		})
-	}
-}
 
 // --- Mocks ---
 
@@ -109,25 +85,58 @@ func (m *mockExif) Extract(path string) (photo.Photo, error) {
 	return photo.Photo{Name: filepath.Base(path), Path: path}, errors.New("no exif data")
 }
 
-// mockSender collects all sent messages for assertions.
-type mockSender struct {
-	mu   sync.Mutex
-	msgs []tea.Msg
+// fakeTracker records what the work tells, as the events below.
+type fakeTracker struct {
+	mu     sync.Mutex
+	events []any
 }
 
-func (m *mockSender) Send(msg tea.Msg) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.msgs = append(m.msgs, msg)
+type (
+	readEvent struct {
+		image string
+		photo photo.Photo
+		err   error
+	}
+	renamedEvent struct {
+		photo  photo.Photo
+		dryrun bool
+		err    error
+	}
+	warnedEvent  struct{ name, text string }
+	cleanedEvent struct {
+		dir           string
+		dryrun, empty bool
+		err           error
+	}
+)
+
+func (t *fakeTracker) add(e any) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.events = append(t.events, e)
 }
 
-func (m *mockSender) getMessages() []tea.Msg {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	cp := make([]tea.Msg, len(m.msgs))
-	copy(cp, m.msgs)
-	return cp
+func (t *fakeTracker) getEvents() []any {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return slices.Clone(t.events)
 }
+
+func (t *fakeTracker) ReadStart(string) {}
+
+func (t *fakeTracker) ReadDone(image string, p photo.Photo, _ time.Duration, err error) {
+	t.add(readEvent{image, p, err})
+}
+func (t *fakeTracker) RenameStart([]photo.Photo, string, bool, bool) {}
+func (t *fakeTracker) Renamed(p photo.Photo, dry bool, err error) {
+	t.add(renamedEvent{p, dry, err})
+}
+func (t *fakeTracker) Warn(name, text string) { t.add(warnedEvent{name, text}) }
+func (t *fakeTracker) CleanStart(bool)        {}
+func (t *fakeTracker) Cleaned(dir string, dry, empty bool, err error) {
+	t.add(cleanedEvent{dir, dry, empty, err})
+}
+func (t *fakeTracker) Finish() {}
 
 // --- buildNewPath tests (pure function, no mocks needed) ---
 
@@ -390,14 +399,14 @@ func TestProcessAll(t *testing.T) {
 		{mockExif: mockExif{photos: photos}},
 		{mockExif: mockExif{photos: photos}},
 	}
-	sender := &mockSender{}
+	sender := &fakeTracker{}
 	cli := CLI{
-		opt:    Option{Dryrun: true},
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		sender: sender,
-		images: images,
-		fs:     newMockFS(),
-		paths:  rename.NewReserver(),
+		opt:     Option{Dryrun: true},
+		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		tracker: sender,
+		images:  images,
+		fs:      newMockFS(),
+		paths:   rename.NewReserver(),
 	}
 	for _, e := range exifs {
 		cli.exifs = append(cli.exifs, e)
@@ -413,15 +422,15 @@ func TestProcessAll(t *testing.T) {
 	}
 
 	var exifOK, exifFailed, renamed int
-	for _, msg := range sender.getMessages() {
+	for _, msg := range sender.getEvents() {
 		switch m := msg.(type) {
-		case exifResultMsg:
+		case readEvent:
 			if m.err != nil {
 				exifFailed++
 			} else {
 				exifOK++
 			}
-		case renameResultMsg:
+		case renamedEvent:
 			renamed++
 		}
 	}
@@ -463,14 +472,14 @@ func TestProcessAllNamesBurstInOrder(t *testing.T) {
 
 			// Workers finish in a different order each time, so repeat
 			for range 20 {
-				sender := &mockSender{}
+				sender := &fakeTracker{}
 				cli := CLI{
-					opt:    Option{Dryrun: true, GroupByExt: true},
-					logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-					sender: sender,
-					images: images,
-					fs:     newMockFS(),
-					paths:  rename.NewReserver(),
+					opt:     Option{Dryrun: true, GroupByExt: true},
+					logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+					tracker: sender,
+					images:  images,
+					fs:      newMockFS(),
+					paths:   rename.NewReserver(),
 				}
 				for range 4 {
 					cli.exifs = append(cli.exifs, &mockExif{photos: photos})
@@ -478,8 +487,8 @@ func TestProcessAllNamesBurstInOrder(t *testing.T) {
 				cli.processAll()
 
 				got := map[string]string{}
-				for _, msg := range sender.getMessages() {
-					if m, ok := msg.(renameResultMsg); ok {
+				for _, msg := range sender.getEvents() {
+					if m, ok := msg.(renamedEvent); ok {
 						got[m.photo.RenamedPath] = m.photo.Name
 					}
 				}
@@ -500,15 +509,15 @@ func TestProcessAllNamesBurstInOrder(t *testing.T) {
 	}
 }
 
-// --- clean tests (with mockFS + mockSender) ---
+// --- clean tests (with mockFS + fakeTracker) ---
 
 func TestClean(t *testing.T) {
 	t.Run("does nothing when Clean=false", func(t *testing.T) {
-		sender := &mockSender{}
-		cli := CLI{opt: Option{Clean: false}, sender: sender, fs: newMockFS()}
+		sender := &fakeTracker{}
+		cli := CLI{opt: Option{Clean: false}, tracker: sender, fs: newMockFS()}
 		cli.clean([]string{"/some/dir"})
 
-		if len(sender.getMessages()) != 0 {
+		if len(sender.getEvents()) != 0 {
 			t.Error("should not send any messages when Clean=false")
 		}
 	})
@@ -518,11 +527,11 @@ func TestClean(t *testing.T) {
 		fs.statFunc = func(name string) (os.FileInfo, error) {
 			return nil, os.ErrNotExist
 		}
-		sender := &mockSender{}
-		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: fs}
+		sender := &fakeTracker{}
+		cli := CLI{opt: Option{Clean: true}, tracker: sender, fs: fs}
 		cli.clean([]string{"/nonexistent"})
 
-		if len(sender.getMessages()) != 0 {
+		if len(sender.getEvents()) != 0 {
 			t.Error("should silently skip non-existent paths")
 		}
 	})
@@ -535,11 +544,11 @@ func TestClean(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		sender := &mockSender{}
-		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: osFS{}}
+		sender := &fakeTracker{}
+		cli := CLI{opt: Option{Clean: true}, tracker: sender, fs: osFS{}}
 		cli.clean([]string{file})
 
-		if len(sender.getMessages()) != 0 {
+		if len(sender.getEvents()) != 0 {
 			t.Error("should skip files (non-directories)")
 		}
 	})
@@ -554,17 +563,17 @@ func TestClean(t *testing.T) {
 		fs := newMockFS()
 		// Use real Stat so rename.EmptyDirs works
 		fs.statFunc = func(name string) (os.FileInfo, error) { return os.Stat(name) }
-		sender := &mockSender{}
-		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: fs}
+		sender := &fakeTracker{}
+		cli := CLI{opt: Option{Clean: true}, tracker: sender, fs: fs}
 		cli.clean([]string{emptyDir})
 
-		msgs := sender.getMessages()
+		msgs := sender.getEvents()
 		if len(msgs) != 1 {
 			t.Fatalf("expected 1 message, got %d", len(msgs))
 		}
-		msg, ok := msgs[0].(cleanResultMsg)
+		msg, ok := msgs[0].(cleanedEvent)
 		if !ok {
-			t.Fatalf("expected cleanResultMsg, got %T", msgs[0])
+			t.Fatalf("expected cleanedEvent, got %T", msgs[0])
 		}
 		if !msg.empty {
 			t.Error("expected empty=true")
@@ -585,15 +594,15 @@ func TestClean(t *testing.T) {
 
 		fs := newMockFS()
 		fs.statFunc = func(name string) (os.FileInfo, error) { return os.Stat(name) }
-		sender := &mockSender{}
-		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: fs}
+		sender := &fakeTracker{}
+		cli := CLI{opt: Option{Clean: true}, tracker: sender, fs: fs}
 		cli.clean([]string{dir})
 
-		msgs := sender.getMessages()
+		msgs := sender.getEvents()
 		if len(msgs) != 1 {
 			t.Fatalf("expected 1 message, got %d", len(msgs))
 		}
-		msg, _ := msgs[0].(cleanResultMsg)
+		msg, _ := msgs[0].(cleanedEvent)
 		if msg.empty {
 			t.Error("expected empty=false")
 		}
@@ -611,15 +620,15 @@ func TestClean(t *testing.T) {
 
 		fs := newMockFS()
 		fs.statFunc = func(name string) (os.FileInfo, error) { return os.Stat(name) }
-		sender := &mockSender{}
-		cli := CLI{opt: Option{Clean: true, Dryrun: true}, sender: sender, fs: fs}
+		sender := &fakeTracker{}
+		cli := CLI{opt: Option{Clean: true, Dryrun: true}, tracker: sender, fs: fs}
 		cli.clean([]string{emptyDir})
 
-		msgs := sender.getMessages()
+		msgs := sender.getEvents()
 		if len(msgs) != 1 {
 			t.Fatalf("expected 1 message, got %d", len(msgs))
 		}
-		msg, _ := msgs[0].(cleanResultMsg)
+		msg, _ := msgs[0].(cleanedEvent)
 		if !msg.dryrun {
 			t.Error("expected dryrun=true in message")
 		}
@@ -638,15 +647,15 @@ func TestClean(t *testing.T) {
 		fs := newMockFS()
 		fs.statFunc = func(name string) (os.FileInfo, error) { return os.Stat(name) }
 		fs.removeErr = errors.New("rm failed")
-		sender := &mockSender{}
-		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: fs}
+		sender := &fakeTracker{}
+		cli := CLI{opt: Option{Clean: true}, tracker: sender, fs: fs}
 		cli.clean([]string{emptyDir})
 
-		msgs := sender.getMessages()
+		msgs := sender.getEvents()
 		if len(msgs) != 1 {
 			t.Fatalf("expected 1 message, got %d", len(msgs))
 		}
-		msg, _ := msgs[0].(cleanResultMsg)
+		msg, _ := msgs[0].(cleanedEvent)
 		if msg.err == nil || msg.err.Error() != "rm failed" {
 			t.Errorf("expected 'rm failed' error, got %v", msg.err)
 		}
@@ -665,11 +674,11 @@ func TestClean(t *testing.T) {
 
 		fs := newMockFS()
 		fs.statFunc = func(name string) (os.FileInfo, error) { return os.Stat(name) }
-		sender := &mockSender{}
-		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: fs}
+		sender := &fakeTracker{}
+		cli := CLI{opt: Option{Clean: true}, tracker: sender, fs: fs}
 		cli.clean([]string{empty1, empty2})
 
-		msgs := sender.getMessages()
+		msgs := sender.getEvents()
 		if len(msgs) != 2 {
 			t.Fatalf("expected 2 messages, got %d", len(msgs))
 		}
@@ -682,13 +691,13 @@ func TestClean(t *testing.T) {
 		root := filepath.Join(t.TempDir(), "DCIM")
 		makeTree(t, root, "100MSDCF/.DS_Store", "2024-03-15/a.jpg")
 
-		sender := &mockSender{}
-		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: osFS{}}
+		sender := &fakeTracker{}
+		cli := CLI{opt: Option{Clean: true}, tracker: sender, fs: osFS{}}
 		cli.clean([]string{root})
 
 		var got []string
-		for _, msg := range sender.getMessages() {
-			m, _ := msg.(cleanResultMsg)
+		for _, msg := range sender.getEvents() {
+			m, _ := msg.(cleanedEvent)
 			if m.err != nil {
 				t.Errorf("unexpected error for %s: %v", m.dir, m.err)
 			}
@@ -709,11 +718,11 @@ func TestClean(t *testing.T) {
 		root := filepath.Join(t.TempDir(), "card")
 		makeTree(t, root, ".DS_Store")
 
-		sender := &mockSender{}
-		cli := CLI{opt: Option{Clean: true}, sender: sender, fs: osFS{}}
+		sender := &fakeTracker{}
+		cli := CLI{opt: Option{Clean: true}, tracker: sender, fs: osFS{}}
 		cli.clean([]string{root})
 
-		msgs := sender.getMessages()
+		msgs := sender.getEvents()
 		if msg, ok := firstClean(msgs); len(msgs) != 1 || !ok || !msg.empty {
 			t.Fatalf("expected one removed message, got %v", msgs)
 		}
@@ -728,13 +737,13 @@ func TestClean(t *testing.T) {
 		makeTree(t, root, "100MSDCF/a.jpg", "100MSDCF/.DS_Store")
 		createdAt := time.Date(2024, 3, 15, 14, 30, 45, 0, time.UTC)
 
-		sender := &mockSender{}
+		sender := &fakeTracker{}
 		cli := CLI{
-			opt:    Option{Clean: true, Dryrun: true, GroupByDate: true},
-			sender: sender,
-			fs:     osFS{},
-			paths:  rename.NewReserver(),
-			moves:  rename.NewPendingMoves(),
+			opt:     Option{Clean: true, Dryrun: true, GroupByDate: true},
+			tracker: sender,
+			fs:      osFS{},
+			paths:   rename.NewReserver(),
+			moves:   rename.NewPendingMoves(),
 		}
 		if _, _, err := cli.rename(photo.Photo{
 			Name:      "a.jpg",
@@ -748,8 +757,8 @@ func TestClean(t *testing.T) {
 		cli.clean([]string{root})
 
 		var got []string
-		for _, msg := range sender.getMessages() {
-			m, _ := msg.(cleanResultMsg)
+		for _, msg := range sender.getEvents() {
+			m, _ := msg.(cleanedEvent)
 			got = append(got, fmt.Sprintf("%s:%v:%v", m.dir, m.dryrun, m.empty))
 		}
 		if want := "DCIM/100MSDCF:true:true,DCIM:true:false"; strings.Join(got, ",") != want {
@@ -784,55 +793,11 @@ func makeTree(t *testing.T, root string, paths ...string) {
 	}
 }
 
-// firstClean is the first message, when it is a cleanResultMsg.
-func firstClean(msgs []tea.Msg) (cleanResultMsg, bool) {
+// firstClean is the first message, when it is a cleanedEvent.
+func firstClean(msgs []any) (cleanedEvent, bool) {
 	if len(msgs) == 0 {
-		return cleanResultMsg{}, false
+		return cleanedEvent{}, false
 	}
-	msg, ok := msgs[0].(cleanResultMsg)
+	msg, ok := msgs[0].(cleanedEvent)
 	return msg, ok
 }
-
-// A signal stops the program for as long as it runs, also once the work
-// has ended (as the reading under the screen does long before the screen
-// is decided), and cancels the run.
-func TestRunProgramSignalAfterWork(t *testing.T) {
-	canceled := make(chan struct{})
-	var once sync.Once
-	c := CLI{canceled: canceled, cancel: func() { once.Do(func() { close(canceled) }) }}
-	p := tea.NewProgram(waitModel{}, tea.WithInput(nil), tea.WithOutput(io.Discard), tea.WithoutSignalHandler())
-	workDone := make(chan struct{})
-	go func() {
-		<-workDone
-		time.Sleep(50 * time.Millisecond)
-		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
-		// a signal that does not reach the program fails the test rather
-		// than leaving it running
-		time.AfterFunc(3*time.Second, p.Quit)
-	}()
-	final, err := c.runProgram(p, func() { close(workDone) })
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m, _ := final.(waitModel); !m.interrupted {
-		t.Error("the program did not get the signal")
-	}
-	if !c.isCanceled() {
-		t.Error("the run was not canceled")
-	}
-}
-
-// waitModel runs until a signal reaches it.
-type waitModel struct{ interrupted bool }
-
-func (m waitModel) Init() tea.Cmd { return nil }
-
-func (m waitModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if _, ok := msg.(interruptMsg); ok {
-		m.interrupted = true
-		return m, tea.Quit
-	}
-	return m, nil
-}
-
-func (m waitModel) View() tea.View { return tea.NewView("") }

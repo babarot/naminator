@@ -1,4 +1,4 @@
-package main
+package ui
 
 import (
 	"errors"
@@ -16,9 +16,9 @@ import (
 
 // The golden views pin how the screens look, characters and colors, so
 // that a change that alters them shows as a diff of testdata/golden. Run
-// go test -run TestGolden -update to accept one.
+// go test ./internal/ui -run TestGolden -update to accept one.
 
-var updateGolden = flag.Bool("update", false, "rewrite testdata/golden, and the table of docs/architecture.md")
+var updateGolden = flag.Bool("update", false, "rewrite testdata/golden")
 
 // goldenNow is the time the golden views are drawn at.
 var goldenNow = time.Date(2026, 10, 4, 15, 0, 0, 0, time.UTC)
@@ -246,10 +246,10 @@ func compareGolden(t *testing.T, path, got string) {
 	}
 	want, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("%v (run go test -run TestGolden -update)", err)
+		t.Fatalf("%v (run go test ./internal/ui -run TestGolden -update)", err)
 	}
 	if !sameView(got, string(want)) {
-		t.Errorf("view differs from %s (run go test -run TestGolden -update to accept)\n--- got ---\n%s--- want ---\n%s", path, got, want)
+		t.Errorf("view differs from %s (run go test ./internal/ui -run TestGolden -update to accept)\n--- got ---\n%s--- want ---\n%s", path, got, want)
 	}
 }
 

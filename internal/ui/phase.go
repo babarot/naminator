@@ -1,4 +1,4 @@
-package main
+package ui
 
 import (
 	"fmt"
@@ -70,10 +70,10 @@ type phase struct {
 	peak int
 }
 
-// failure is an error to report in full at the end of the run.
-type failure struct {
-	name string
-	err  string
+// Failure is an error to report in full at the end of the run.
+type Failure struct {
+	Name string
+	Err  string
 }
 
 func newPhase(msg phaseStartMsg, now time.Time) *phase {
@@ -93,7 +93,7 @@ func (p *phase) add(key, name string) *item {
 
 // apply records a message about a row, and returns the row when it finished
 // and the failure to report, if any.
-func (p *phase) apply(msg tea.Msg, now time.Time) (*item, *failure) {
+func (p *phase) apply(msg tea.Msg, now time.Time) (*item, *Failure) {
 	switch msg := msg.(type) {
 	case exifStartMsg:
 		if it := p.byKey[msg.image]; it != nil && it.status == itemQueued {
@@ -112,9 +112,9 @@ func (p *phase) apply(msg tea.Msg, now time.Time) (*item, *failure) {
 			it = p.add(key, filepath.Base(key))
 		}
 		if msg.err != nil {
-			return p.finish(it, markFailed, "", msg.err.Error(), time.Duration(msg.duration), now)
+			return p.finish(it, markFailed, "", msg.err.Error(), msg.duration, now)
 		}
-		return p.finish(it, markNone, "", "", time.Duration(msg.duration), now)
+		return p.finish(it, markNone, "", "", msg.duration, now)
 
 	case renameResultMsg:
 		it := p.byKey[msg.photo.Path]
@@ -133,7 +133,7 @@ func (p *phase) apply(msg tea.Msg, now time.Time) (*item, *failure) {
 		}
 
 	case warnMsg:
-		return nil, &failure{name: msg.name, err: msg.text}
+		return nil, &Failure{Name: msg.name, Err: msg.text}
 
 	case cleanResultMsg:
 		it := p.byKey[msg.dir]
@@ -166,7 +166,7 @@ func sidecarNote(photo photo.Photo) string {
 	return "  + " + strings.Join(exts, " ")
 }
 
-func (p *phase) finish(it *item, m mark, label, err string, took time.Duration, now time.Time) (*item, *failure) {
+func (p *phase) finish(it *item, m mark, label, err string, took time.Duration, now time.Time) (*item, *Failure) {
 	if it.status == itemDone || it.status == itemCanceled {
 		// A result after Ctrl+C, of work that was already running.
 		return nil, nil
@@ -178,7 +178,7 @@ func (p *phase) finish(it *item, m mark, label, err string, took time.Duration, 
 	p.finished = append(p.finished, it)
 	p.last = now
 	if m == markFailed {
-		return it, &failure{name: it.name, err: err}
+		return it, &Failure{Name: it.name, Err: err}
 	}
 	return it, nil
 }
@@ -565,11 +565,11 @@ func (p *phase) compactEnd() []string {
 //
 //	broken.jpg:
 //	  exiftool: Error: File format error
-func errorReport(failures []failure) []string {
+func errorReport(failures []Failure) []string {
 	var lines []string
 	for _, f := range failures {
-		lines = append(lines, "  "+Bold.Render(f.name+":"))
-		for l := range strings.SplitSeq(f.err, "\n") {
+		lines = append(lines, "  "+Bold.Render(f.Name+":"))
+		for l := range strings.SplitSeq(f.Err, "\n") {
 			lines = append(lines, "    "+Dim.Render(l))
 		}
 		lines = append(lines, "")

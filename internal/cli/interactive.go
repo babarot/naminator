@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"errors"
@@ -6,11 +6,8 @@ import (
 	"os"
 
 	"github.com/babarot/naminator/internal/config"
-	"github.com/babarot/naminator/internal/photo"
 	"github.com/babarot/naminator/internal/rename"
-
-	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
+	"github.com/babarot/naminator/internal/ui"
 )
 
 // interactive reports whether the run opens the interactive screen: in a
@@ -72,63 +69,48 @@ func onlyFiles(args []string) bool {
 	return len(args) > 0
 }
 
-// runInteractive runs the interactive screen, on the alternate screen,
-// while the EXIF data is read. Once confirmed, the screen ends, and the
-// photos are renamed with the format chosen by runDecided, with the usual
-// display from the rename phase in the shell's scrollback.
-func (c CLI) runInteractive(tui tuiModel) error {
-	// the color of the cursor's line suits the terminal's background
-	tui.dark = lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
-	p := tea.NewProgram(tui, tea.WithoutSignalHandler())
-	c.p, c.sender = p, p
+// runInteractive runs the interactive screen while the EXIF data is read.
+// Once confirmed, the screen ends, and the photos are renamed as decided
+// (runDecided).
+func (c CLI) runInteractive(screen *ui.Screen) error {
+	c.tracker = screen
 	// The screen ends once decided, and the EXIF data is all read before
 	// it can be confirmed: the work is the reading only.
-	final, err := c.runProgram(p, func() { c.extractAll() })
+	d, err := screen.Do(func() { c.extractAll() })
 	if err != nil {
 		return err
 	}
-	m, _ := final.(tuiModel)
 	switch {
-	case m.result == tuiQuit:
+	case d.Result == ui.Quit:
 		// q also cancels, to stop the reading: quitting is not canceling
 		return nil
-	case m.result != tuiConfirmed || c.isCanceled():
+	case d.Result != ui.Confirmed || c.isCanceled():
 		return errCanceled
 	}
-	return c.runDecided(m)
+	return c.runDecided(d)
 }
 
-// runDecided renames the photos as the screen m decided, with the run's
-// display, a program of its own drawn below the shell's prompt.
-func (c CLI) runDecided(m tuiModel) error {
-	d := m.decision()
-	tpl, err := rename.ParseTemplate(d.format)
+// runDecided renames the photos as the screen decided, with the display of
+// a run in the shell's scrollback.
+func (c CLI) runDecided(d ui.Decision) error {
+	tpl, err := rename.ParseTemplate(d.Format)
 	if err != nil {
 		return err
 	}
 	c.namer = rename.NewNamer(tpl, c.args, c.opt.DestDir)
 	// the photos go where the screen showed them going
-	c.planned = d.targets
-	c.logger.Debug("format chosen", "format", d.format)
+	c.planned = d.Targets
+	c.logger.Debug("format chosen", "format", d.Format)
 
-	// The photos given the file's time are among those of the screen
-	photos := m.photos()
-	photo.SortByTime(photos)
-	fmt.Println(Dim.Render("Format: ") + Blue.Render(m.base()) + d.format)
-	run := newModel(phaseStartMsg{kind: phaseRename, keys: photo.Paths(photos), base: c.base, into: c.into, dry: c.opt.Dryrun}, c.cancel)
-	if title := run.startCompact(); title != "" {
-		fmt.Println(title)
-	}
-	// the photos were read on the screen: the run can end at once
-	run.awaitReply = true
-	c.p = tea.NewProgram(run, tea.WithoutSignalHandler())
-	c.sender = c.p
-	return c.runWork(func() {
+	fmt.Println(ui.FormatLine(d))
+	display := ui.NewRun(ui.RenamePhase(d.Photos, c.base, c.into, c.opt.Dryrun), c.cancel)
+	c.tracker = display
+	return c.runWork(display, func() {
 		// The photos the screen could not read are reported at the end
-		for _, f := range d.failed {
-			c.sender.Send(warnMsg{name: f.name, text: f.err})
+		for _, f := range d.Failed {
+			c.tracker.Warn(f.Name, f.Err)
 		}
-		c.renameAll(photos, false)
+		c.renameAll(d.Photos, false)
 		c.finish()
 	})
 }

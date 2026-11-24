@@ -1,13 +1,14 @@
-package main
+package ui
 
 import (
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/babarot/naminator/internal/photo"
 )
 
-// The work reports to the display (sender) with these messages. A run is
+// The work reports to the display (Tracker) with these messages. A run is
 // made of phases: reading EXIF, renaming, and removing empty directories
 // (--clean). phaseStartMsg starts each one but the first, which the display
 // is made with; finishMsg ends the run.
@@ -48,7 +49,7 @@ type exifResultMsg struct {
 	// exiftool reports, which can be empty on an error.
 	image    string
 	photo    photo.Photo
-	duration duration
+	duration time.Duration
 	err      error
 }
 

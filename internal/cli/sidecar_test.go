@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"io"
@@ -15,12 +15,12 @@ import (
 
 func sidecarCLI(root string, opt Option) CLI {
 	return CLI{
-		opt:    opt,
-		fs:     osFS{},
-		paths:  rename.NewReserver(),
-		moves:  rename.NewPendingMoves(),
-		sender: &mockSender{},
-		namer:  rename.NewNamer(rename.MustParseTemplate("{ext}/{date}/{date}_{time}"), []string{filepath.Join(root, "card")}, ""),
+		opt:     opt,
+		fs:      osFS{},
+		paths:   rename.NewReserver(),
+		moves:   rename.NewPendingMoves(),
+		tracker: &fakeTracker{},
+		namer:   rename.NewNamer(rename.MustParseTemplate("{ext}/{date}/{date}_{time}"), []string{filepath.Join(root, "card")}, ""),
 	}
 }
 
@@ -48,8 +48,8 @@ func TestRenameMovesSidecars(t *testing.T) {
 			t.Errorf("%s: %v", p, err)
 		}
 	}
-	if len(photo.RenamedSidecars) != 1 || sidecarNote(photo) != "  + xmp" {
-		t.Errorf("RenamedSidecars = %v, note %q", photo.RenamedSidecars, sidecarNote(photo))
+	if len(photo.RenamedSidecars) != 1 {
+		t.Errorf("RenamedSidecars = %v", photo.RenamedSidecars)
 	}
 	// the card is left empty, so --clean can remove it
 	if entries, _ := os.ReadDir(filepath.Join(root, "card")); len(entries) != 0 {
@@ -103,17 +103,17 @@ func TestProcessAllReportsSidecarsLeft(t *testing.T) {
 		images = append(images, path)
 		photos[path] = photo.Photo{Name: name, Path: path, Dir: filepath.Join(root, "card"), Extension: strings.ToLower(strings.TrimPrefix(filepath.Ext(name), ".")), CreatedAt: at}
 	}
-	sender := &mockSender{}
+	sender := &fakeTracker{}
 	cli := sidecarCLI(root, Option{Dryrun: true})
-	cli.sender = sender
+	cli.tracker = sender
 	cli.images = images
 	cli.exifs = []photo.Extractor{&mockExif{photos: photos}}
 	cli.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	cli.processAll()
 
-	var warned []warnMsg
-	for _, m := range sender.getMessages() {
-		if w, ok := m.(warnMsg); ok {
+	var warned []warnedEvent
+	for _, m := range sender.getEvents() {
+		if w, ok := m.(warnedEvent); ok {
 			warned = append(warned, w)
 		}
 	}

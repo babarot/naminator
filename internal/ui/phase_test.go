@@ -1,4 +1,4 @@
-package main
+package ui
 
 import (
 	"errors"
@@ -23,13 +23,13 @@ func TestPhaseApply(t *testing.T) {
 		if p.items[0].status != itemRunning || p.items[1].status != itemQueued {
 			t.Fatalf("statuses = %v, %v", p.items[0].status, p.items[1].status)
 		}
-		it, f := p.apply(exifResultMsg{image: "/p/a.jpg", photo: photo.Photo{Path: "/p/a.jpg"}, duration: duration(300 * time.Millisecond)}, t0.Add(time.Second))
+		it, f := p.apply(exifResultMsg{image: "/p/a.jpg", photo: photo.Photo{Path: "/p/a.jpg"}, duration: 300 * time.Millisecond}, t0.Add(time.Second))
 		if it == nil || it.mark != markNone || f != nil {
 			t.Errorf("ok result: item=%+v failure=%v", it, f)
 		}
 		// exiftool reports no path on some errors: the image is the key
 		_, f = p.apply(exifResultMsg{image: "/p/b.jpg", err: errors.New("File format error")}, t0.Add(2*time.Second))
-		if f == nil || f.name != "b.jpg" || p.items[1].mark != markFailed {
+		if f == nil || f.Name != "b.jpg" || p.items[1].mark != markFailed {
 			t.Errorf("failure = %v, mark = %v", f, p.items[1].mark)
 		}
 		if got := plain(p.outcome()); got != "✗ Read EXIF of 2 photos in 2.0s, 1 failed" {
@@ -119,7 +119,7 @@ func TestPhaseTarget(t *testing.T) {
 
 func TestPhaseRow(t *testing.T) {
 	p := newPhase(phaseStartMsg{kind: phaseExif, keys: []string{"/p/broken.jpg", "/p/写真のファイル名がとても長い場合のテスト.jpg"}}, t0)
-	p.apply(exifResultMsg{image: "/p/broken.jpg", err: errors.New("no date found\ntried: DateTimeOriginal"), duration: duration(100 * time.Millisecond)}, t0)
+	p.apply(exifResultMsg{image: "/p/broken.jpg", err: errors.New("no date found\ntried: DateTimeOriginal"), duration: 100 * time.Millisecond}, t0)
 
 	row := plain(p.row(p.items[0], "", t0, 0))
 	if !strings.HasPrefix(row, "  ✗ broken.jpg") || !strings.HasSuffix(row, "0.1s  no date found…") {
@@ -206,8 +206,18 @@ func TestPhaseCompactKeepsHeight(t *testing.T) {
 }
 
 func TestErrorReport(t *testing.T) {
-	got := plain(strings.Join(errorReport([]failure{{name: "a.jpg", err: "line 1\nline 2"}}), "\n"))
+	got := plain(strings.Join(errorReport([]Failure{{Name: "a.jpg", Err: "line 1\nline 2"}}), "\n"))
 	if want := "  a.jpg:\n    line 1\n    line 2\n"; got != want {
 		t.Errorf("report = %q, want %q", got, want)
+	}
+}
+
+// A photo renamed with sidecars says which went with it.
+func TestSidecarNote(t *testing.T) {
+	if got := plain(sidecarNote(photo.Photo{RenamedSidecars: []string{"/p/2026-10-04_14-22-09.xmp"}})); got != "  + xmp" {
+		t.Errorf("note = %q", got)
+	}
+	if got := sidecarNote(photo.Photo{}); got != "" {
+		t.Errorf("without sidecars: %q", got)
 	}
 }

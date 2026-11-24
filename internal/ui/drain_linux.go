@@ -1,6 +1,6 @@
 //go:build linux || solaris || aix
 
-package main
+package ui
 
 import (
 	"os"
