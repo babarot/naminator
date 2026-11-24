@@ -42,32 +42,13 @@ func (n *Namer) Target(photo photo.Photo) string {
 // given. Both bases are the directory an argument is in (for a directory
 // given, its parent); destDir, when set, is the output base instead.
 func NewNamer(tpl Template, args []string, destDir string) *Namer {
-	input := func(p photo.Photo) string { return ArgParent(args, p.Path) }
+	a := NewArgs(args)
+	input := func(p photo.Photo) string { return a.Parent(p.Path) }
 	output := input
 	if destDir != "" {
 		output = func(photo.Photo) string { return destDir }
 	}
 	return &Namer{tpl: tpl, Output: output, Input: input}
-}
-
-// ArgParent returns the directory the argument path came from is in: for a
-// directory given, its parent; for a file given, its directory.
-func ArgParent(args []string, path string) string {
-	abs := AbsPath(path)
-	best := ""
-	for _, arg := range args {
-		a := AbsPath(arg)
-		if abs == a || strings.HasPrefix(abs, a+string(filepath.Separator)) {
-			// the longest match, for arguments inside one another
-			if len(arg) > len(best) {
-				best = arg
-			}
-		}
-	}
-	if best == "" || AbsPath(best) == abs {
-		return filepath.Dir(path)
-	}
-	return filepath.Dir(filepath.Clean(best))
 }
 
 // LegacyFlags are the flags -t, -e, -E and -d.

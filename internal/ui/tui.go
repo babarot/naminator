@@ -74,12 +74,14 @@ func (v tuiView) String() string {
 // tuiRow is one photo of the list, in the order the photos were given.
 type tuiRow struct {
 	key   string // the path the photo was read from
+	from  string // key, as it is shown
 	photo photo.Photo
 	read  bool   // its EXIF data has come
 	err   string // reading it failed (no shooting time, ...)
 	// target is where it would go with the format, suffix the "_1" the
 	// reserver added to it, and same reports that it is already named so
 	target string
+	to     string // target, as it is shown
 	suffix string
 	same   bool
 	// fileTime uses the file's modification time for a photo without a
@@ -108,6 +110,7 @@ type tuiModel struct {
 	presets []rename.Preset
 	cancel  func()
 	keys    keymap.Map
+	paths   rename.Args
 
 	rows   []*tuiRow
 	byKey  map[string]*tuiRow
@@ -118,6 +121,11 @@ type tuiModel struct {
 	tplErr string
 	// sidecars are found once every photo is read
 	sidecars map[string][]string
+
+	// gen changes with what the list and the tree show; list holds the
+	// lines of one of them, built for a gen
+	gen  int
+	list itemList
 
 	// view is the list or the tree; folded are the directories folded in
 	// the tree, and expanded those whose runs of files are all shown
@@ -153,7 +161,7 @@ func newTUIModel(args, images []string, format, destDir string, dry, clean bool,
 		width, height = w, h
 	}
 	m := tuiModel{
-		args: args, destDir: destDir, dry: dry, clean: clean, fs: fsys, cfgPath: cfgPath, presets: presets, cancel: cancel, keys: keymap.Default(), st: theme.For(true), now: time.Now,
+		args: args, paths: rename.NewArgs(args), destDir: destDir, dry: dry, clean: clean, fs: fsys, cfgPath: cfgPath, presets: presets, cancel: cancel, keys: keymap.Default(), st: theme.For(true), now: time.Now,
 		byKey:    map[string]*tuiRow{},
 		folded:   map[string]bool{},
 		expanded: map[string]bool{},
@@ -163,6 +171,7 @@ func newTUIModel(args, images []string, format, destDir string, dry, clean bool,
 	}
 	for _, img := range images {
 		r := &tuiRow{key: img}
+		r.from = m.shown(r, img)
 		m.rows = append(m.rows, r)
 		m.byKey[img] = r
 	}
@@ -182,6 +191,7 @@ func (m *tuiModel) setFormat(f string) {
 // plan gives each read photo its path with the format: in the order the
 // photos are taken, through a reserver, as the run will.
 func (m *tuiModel) plan() {
+	m.gen++
 	tpl, err := rename.ParseTemplate(m.format)
 	if err != nil {
 		m.tplErr, m.namer = err.Error(), nil
@@ -202,6 +212,7 @@ func (m *tuiModel) plan() {
 		r := m.byKey[m.keyOf(p)]
 		want := m.namer.Target(p)
 		r.target = reserver.Reserve(m.fs, p.Path, want)
+		r.to = m.shown(r, r.target)
 		r.same = r.target == p.Path
 		r.suffix = strings.TrimPrefix(strings.TrimSuffix(r.target, filepath.Ext(r.target)), strings.TrimSuffix(want, filepath.Ext(want)))
 	}
@@ -240,6 +251,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if tm, ok := next.(tuiModel); ok {
 		// The lines can be fewer after a photo is read or the format
 		// changes: keep the cursor on one of them
+		tm.keepItems()
 		tm.sel = max(0, min(tm.sel, len(tm.items())-1))
 		// keep the lines shown, moving them only to keep the cursor in
 		tm.top = tm.window().top
@@ -508,19 +520,45 @@ func (m *tuiModel) toggleView() {
 	m.sel = 0
 }
 
-// items returns the lines of the view, as the cursor moves on them.
+// itemList is the lines of the list or the tree (view), built for a gen of
+// the screen. It is kept, since each key and each frame looks at them, and
+// building them takes a time that grows with the photos.
+type itemList struct {
+	gen   int // 0 for none
+	view  tuiView
+	items []tuiItem
+}
+
+// items are the lines of the list or the tree, as they are kept, or built
+// when they are not.
 func (m tuiModel) items() []tuiItem {
+	if m.list.gen == m.gen && m.list.view == m.view {
+		return m.list.items
+	}
+	return m.buildItems()
+}
+
+// keepItems builds the lines again when what they show has changed.
+func (m *tuiModel) keepItems() {
+	if m.list.gen != m.gen || m.list.view != m.view {
+		m.list = itemList{gen: m.gen, view: m.view, items: m.buildItems()}
+	}
+}
+
+// buildItems builds the lines of the list or the tree. How a line is drawn
+// is told by the screen as it is then.
+func (m tuiModel) buildItems() []tuiItem {
 	if m.view == viewTree {
 		return m.treeItems()
 	}
 	fromW := 0
 	for _, r := range m.rows {
-		fromW = max(fromW, ansi.StringWidth(m.shown(r, r.key)))
+		fromW = max(fromW, ansi.StringWidth(r.from))
 	}
 	fromW = min(fromW, 36)
 	items := make([]tuiItem, len(m.rows))
 	for i, r := range m.rows {
-		items[i] = tuiItem{kind: itemRow, row: r, draw: func(sel bool) string { return m.row(r, sel, fromW) }}
+		items[i] = tuiItem{kind: itemRow, row: r, draw: func(m tuiModel, sel bool) string { return m.row(r, sel, fromW) }}
 	}
 	return items
 }
@@ -713,9 +751,9 @@ func (m tuiModel) lines() []string {
 	}
 	for j := win.top; j < win.top+win.rows; j++ {
 		if j == m.sel && !m.st.Plain {
-			lines = append(lines, m.highlight(fitLine(items[j].draw(false), w), w))
+			lines = append(lines, m.highlight(fitLine(items[j].draw(m, false), w), w))
 		} else {
-			lines = append(lines, fitLine(items[j].draw(j == m.sel), w))
+			lines = append(lines, fitLine(items[j].draw(m, j == m.sel), w))
 		}
 	}
 	if win.down {
@@ -756,7 +794,7 @@ func (m tuiModel) base() string {
 	if !r.read {
 		p = photo.Photo{Path: r.key, Dir: filepath.Dir(r.key)}
 	}
-	return m.shortDir(rename.AbsPath(m.namer.Output(p))) + "/"
+	return m.shortDir(m.paths.Abs(m.namer.Output(p))) + "/"
 }
 
 // shortDir shows dir from the home directory, and only its last two
@@ -853,7 +891,7 @@ func (m tuiModel) row(r *tuiRow, selected bool, fromW int) string {
 	if selected {
 		lead = m.st.Active.Render(">") + " "
 	}
-	from := padName(m.shown(r, r.key), fromW)
+	from := padName(r.from, fromW)
 	switch {
 	case !r.read:
 		return lead + m.st.Dim.Render(iconQueued) + " " + m.st.Dim.Render(from) + "  " + m.st.Dim.Render("reading EXIF…")
@@ -864,7 +902,7 @@ func (m tuiModel) row(r *tuiRow, selected bool, fromW int) string {
 	case r.same:
 		return lead + m.st.Success.Render(iconSuccess) + " " + m.st.Dim.Render(from) + "  " + m.st.Dim.Render("already named")
 	}
-	to := m.shown(r, r.target)
+	to := r.to
 	if r.suffix != "" {
 		base := strings.TrimSuffix(to, filepath.Ext(to))
 		to = strings.TrimSuffix(base, r.suffix) + m.st.Warn.Render(r.suffix) + filepath.Ext(to)
@@ -1123,11 +1161,12 @@ func btoi(b bool) int {
 // for ~/Desktop/card), however they were given. A path outside it, such
 // as under -d, is written from the home directory.
 func (m tuiModel) shown(r *tuiRow, path string) string {
-	base := rename.AbsPath(rename.ArgParent(m.args, r.key))
-	if rel, err := filepath.Rel(base, rename.AbsPath(path)); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	base := m.paths.Abs(m.paths.Parent(r.key))
+	abs := m.paths.Abs(path)
+	if rel, err := filepath.Rel(base, abs); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return rel
 	}
-	return abbrevHome(rename.AbsPath(path), os.Getenv("HOME"))
+	return abbrevHome(abs, os.Getenv("HOME"))
 }
 
 // padRight pads s with spaces to width cells, or cuts it.

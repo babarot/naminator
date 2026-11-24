@@ -283,7 +283,7 @@ func newCardsTUI(t *testing.T) tuiModel {
 func treeText(m tuiModel) []string {
 	var out []string
 	for _, it := range m.items() {
-		out = append(out, ansi.Strip(it.draw(false)))
+		out = append(out, ansi.Strip(it.draw(m, false)))
 	}
 	return out
 }
@@ -630,7 +630,7 @@ func TestTUIMouseOff(t *testing.T) {
 // the arguments are usually given, also when given as absolute paths.
 func TestTUIShownPath(t *testing.T) {
 	t.Setenv("HOME", "/home/u")
-	m := tuiModel{args: []string{"/home/u/Desktop/panda/"}}
+	m := tuiModel{args: []string{"/home/u/Desktop/panda/"}, paths: rename.NewArgs([]string{"/home/u/Desktop/panda/"})}
 	r := &tuiRow{key: "/home/u/Desktop/panda/A7C02795.ARW"}
 	for path, want := range map[string]string{
 		r.key:                              "panda/A7C02795.ARW",
@@ -642,7 +642,7 @@ func TestTUIShownPath(t *testing.T) {
 			t.Errorf("shown(%q) = %q, want %q", path, got, want)
 		}
 	}
-	rel := tuiModel{args: []string{"card"}}
+	rel := tuiModel{args: []string{"card"}, paths: rename.NewArgs([]string{"card"})}
 	if got := rel.shown(&tuiRow{key: "card/DSC00001.JPG"}, "card/DSC00001.JPG"); got != "card/DSC00001.JPG" {
 		t.Errorf("relative: %q", got)
 	}

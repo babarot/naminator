@@ -25,7 +25,9 @@ type tuiItem struct {
 	kind itemKind
 	row  *tuiRow // the photo of a row or a file line
 	path string  // a directory's path, or the directory of a file or "more" line
-	draw func(selected bool) string
+	// draw draws the line on the screen m, which may have moved on since the
+	// line was built
+	draw func(m tuiModel, selected bool) string
 }
 
 type itemKind int
@@ -73,11 +75,11 @@ func (m tuiModel) tree() *treeDir {
 		if r.usable() && r.target != "" && m.tplErr == "" {
 			path = r.target
 		}
-		entries = append(entries, entry{rename.AbsPath(path), treeFile{name: filepath.Base(path), row: r}})
+		entries = append(entries, entry{m.paths.Abs(path), treeFile{name: filepath.Base(path), row: r}})
 		if r.usable() && r.target != "" && !r.same && m.tplErr == "" {
 			for _, sc := range m.sidecars[r.photo.Path] {
 				to := rename.SidecarTarget(r.photo.Path, r.target, sc)
-				entries = append(entries, entry{rename.AbsPath(to), treeFile{name: filepath.Base(to), row: r, sidecar: true}})
+				entries = append(entries, entry{m.paths.Abs(to), treeFile{name: filepath.Base(to), row: r, sidecar: true}})
 			}
 		}
 	}
@@ -88,7 +90,7 @@ func (m tuiModel) tree() *treeDir {
 		paths = append(paths, filepath.Dir(e.path))
 	}
 	for _, d := range m.removed {
-		paths = append(paths, filepath.Dir(rename.AbsPath(d)))
+		paths = append(paths, filepath.Dir(m.paths.Abs(d)))
 	}
 	for i, p := range paths {
 		if i == 0 {
@@ -121,7 +123,7 @@ func (m tuiModel) tree() *treeDir {
 		d.files = append(d.files, e.file)
 	}
 	for _, r := range m.removed {
-		dir(rename.AbsPath(r)).removed = true
+		dir(m.paths.Abs(r)).removed = true
 	}
 	return root
 }
@@ -171,7 +173,7 @@ func (d *treeDir) countText(st theme.Styles) string {
 // treeItems lays the tree out as lines.
 func (m tuiModel) treeItems() []tuiItem {
 	root := m.tree()
-	lead := func(selected bool) string {
+	lead := func(m tuiModel, selected bool) string {
 		if selected {
 			return m.st.Active.Render(">") + " "
 		}
@@ -185,8 +187,8 @@ func (m tuiModel) treeItems() []tuiItem {
 	// the old paths line up; a longer line goes past it
 	arrowCol := 0
 	arrowAt := &arrowCol
-	items := []tuiItem{{kind: itemRoot, path: root.path, draw: func(sel bool) string {
-		return lead(sel) + m.st.Dim.Render(rootMark) + m.st.Path.Render(root.name+"/") + root.countText(m.st)
+	items := []tuiItem{{kind: itemRoot, path: root.path, draw: func(m tuiModel, sel bool) string {
+		return lead(m, sel) + m.st.Dim.Render(rootMark) + m.st.Path.Render(root.name+"/") + root.countText(m.st)
 	}}}
 	var walk func(d *treeDir, prefix string)
 	walk = func(d *treeDir, prefix string) {
@@ -248,19 +250,19 @@ func (m tuiModel) treeItems() []tuiItem {
 					mark = "▸ "
 				}
 				empty := sub.removed && len(sub.files) == 0 && len(sub.dirs) == 0
-				items = append(items, tuiItem{kind: itemDir, path: sub.path, draw: func(sel bool) string {
+				items = append(items, tuiItem{kind: itemDir, path: sub.path, draw: func(m tuiModel, sel bool) string {
 					if empty {
-						return lead(sel) + m.st.Dim.Render(prefix+branch+"  "+sub.name+"/") + sub.countText(m.st)
+						return lead(m, sel) + m.st.Dim.Render(prefix+branch+"  "+sub.name+"/") + sub.countText(m.st)
 					}
-					return lead(sel) + m.st.Dim.Render(prefix+branch+mark) + m.st.Path.Render(sub.name+"/") + sub.countText(m.st)
+					return lead(m, sel) + m.st.Dim.Render(prefix+branch+mark) + m.st.Path.Render(sub.name+"/") + sub.countText(m.st)
 				}})
 				if !folded {
 					walk(sub, next)
 				}
 			case l.more > 0:
 				n := l.more
-				items = append(items, tuiItem{kind: itemMore, path: d.path, draw: func(sel bool) string {
-					return lead(sel) + m.st.Dim.Render(prefix+branch) + m.st.Dim.Render(fmt.Sprintf("⋯ %d more files", n))
+				items = append(items, tuiItem{kind: itemMore, path: d.path, draw: func(m tuiModel, sel bool) string {
+					return lead(m, sel) + m.st.Dim.Render(prefix+branch) + m.st.Dim.Render(fmt.Sprintf("⋯ %d more files", n))
 				}})
 			default:
 				f := *l.file
@@ -268,8 +270,8 @@ func (m tuiModel) treeItems() []tuiItem {
 				if m.arrowed(f) {
 					arrowCol = max(arrowCol, min(w, maxArrowCol))
 				}
-				items = append(items, tuiItem{kind: itemFile, row: f.row, path: d.path, draw: func(sel bool) string {
-					return lead(sel) + m.st.Dim.Render(prefix+branch) + m.fileText(f, *arrowAt-w)
+				items = append(items, tuiItem{kind: itemFile, row: f.row, path: d.path, draw: func(m tuiModel, sel bool) string {
+					return lead(m, sel) + m.st.Dim.Render(prefix+branch) + m.fileText(f, *arrowAt-w)
 				}})
 			}
 		}
@@ -305,7 +307,7 @@ func (m tuiModel) fileText(f treeFile, pad int) string {
 	case r.same || m.tplErr != "":
 		return m.st.Dim.Render(f.name + "  (already named)")
 	}
-	s := f.name + strings.Repeat(" ", max(0, pad)) + m.st.Dim.Render("  ← "+m.shown(r, r.key))
+	s := f.name + strings.Repeat(" ", max(0, pad)) + m.st.Dim.Render("  ← "+r.from)
 	if r.suffix != "" {
 		s += "  " + m.st.Warn.Render(r.suffix)
 	}
@@ -346,6 +348,7 @@ func (m tuiModel) predictRemoved() []string {
 // folds an open directory, or goes up to the directory above. On the top
 // line, h folds and l opens every directory.
 func (m *tuiModel) fold(open bool) {
+	m.gen++
 	items := m.items()
 	if m.view != viewTree || m.sel >= len(items) {
 		return
