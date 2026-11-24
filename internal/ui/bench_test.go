@@ -90,7 +90,7 @@ func BenchmarkKey(b *testing.B) {
 }
 
 // BenchmarkReading is what the screen does while n photos are read: what
-// bubbletea does for each thing the reading tells is an Update and a View.
+// bubbletea does for the results gathered is an Update and a View.
 func BenchmarkReading(b *testing.B) {
 	for _, n := range []int{50, 300, 1000} {
 		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
@@ -98,9 +98,17 @@ func BenchmarkReading(b *testing.B) {
 				b.StopTimer()
 				m, msgs := benchTUI(b, n, "/Volumes/card")
 				b.StartTimer()
-				for _, msg := range msgs {
-					m = m.update0(b, msg)
-					m.View()
+				var results exifResultsMsg
+				for i, msg := range msgs {
+					if r, ok := msg.(exifResultMsg); ok {
+						results = append(results, r)
+					}
+					// as many as ten processes read in gatherEvery
+					if len(results) == 40 || i == len(msgs)-1 {
+						m = m.update0(b, results)
+						m.View()
+						results = nil
+					}
 				}
 			}
 		})

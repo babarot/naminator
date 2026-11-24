@@ -279,19 +279,11 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case exifResultMsg:
-		r := m.byKey[msg.image]
-		if r == nil || r.read {
-			return m, nil
-		}
-		r.read, r.photo = true, msg.photo
-		if msg.err != nil {
-			r.err = msg.err.Error()
-		}
-		m.nRead++
-		if m.nRead == len(m.rows) {
-			m.sidecars, _ = rename.FindSidecars(m.fs, m.photos())
-		}
-		m.plan()
+		m.readResults(msg)
+		return m, nil
+
+	case exifResultsMsg:
+		m.readResults(msg...)
 		return m, nil
 
 	case interruptMsg:
@@ -304,11 +296,34 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.mouse(msg)
 
 	case spinner.TickMsg:
+		if m.nRead == len(m.rows) {
+			// nothing is going on, and nothing draws it
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 	}
 	return m, nil
+}
+
+// readResults takes what the reading told of photos, and plans again.
+func (m *tuiModel) readResults(results ...exifResultMsg) {
+	for _, res := range results {
+		r := m.byKey[res.image]
+		if r == nil || r.read {
+			continue
+		}
+		r.read, r.photo = true, res.photo
+		if res.err != nil {
+			r.err = res.err.Error()
+		}
+		m.nRead++
+	}
+	if m.nRead == len(m.rows) {
+		m.sidecars, _ = rename.FindSidecars(m.fs, m.photos())
+	}
+	m.plan()
 }
 
 // end closes the screen with r. Unless confirmed, the EXIF reading stops.
