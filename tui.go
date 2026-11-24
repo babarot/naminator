@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -542,36 +541,6 @@ func (m *tuiModel) save() {
 	m.notice = Green.Render(iconSuccess) + Dim.Render(" saved as the format in "+abbrevHome(m.cfgPath, os.Getenv("HOME")))
 }
 
-// saveFormat sets format in the configuration file at path: it replaces
-// the line of format, or adds one at the top, and keeps the rest, comments
-// included.
-func saveFormat(path, format string) error {
-	b, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	line := "format: " + strconv.Quote(format)
-	lines := strings.Split(string(b), "\n")
-	done := false
-	for i, l := range lines {
-		if strings.HasPrefix(l, "format:") {
-			lines[i], done = line, true
-			break
-		}
-	}
-	if !done {
-		if len(b) == 0 {
-			lines = []string{line, ""}
-		} else {
-			lines = append([]string{line}, lines...)
-		}
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
-}
-
 // ================= view =================
 
 // listHeight is how many lines the list or the tree gets: as many as it
@@ -807,7 +776,7 @@ func (m tuiModel) partsLine() string {
 	var b strings.Builder
 	b.WriteString(" ")
 	for _, k := range []string{"dir", "date", "time", "ext", "camera", "orig"} {
-		v := r.photo.value(k, dir)
+		v := value(r.photo, k, dir)
 		if v == "" {
 			v = "(none)"
 		}

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -77,12 +78,6 @@ func loadConfig(path string) (config, error) {
 	return c, nil
 }
 
-// preset is a template with a name.
-type preset struct {
-	name   string
-	format string
-}
-
 // allPresets returns the built-in presets, then those of the configuration:
 // one with the name of a built-in preset takes its place.
 func (c config) allPresets() []preset {
@@ -116,6 +111,11 @@ func (c config) findPreset(name string) (string, error) {
 	return "", fmt.Errorf("no preset named %q: use one of %s", name, strings.Join(names, ", "))
 }
 
+// legacy returns the flags -t, -e, -E and -d.
+func (o Option) legacy() legacyFlags {
+	return legacyFlags{byDate: o.GroupByDate, byExt: o.GroupByExt, extFirst: o.GroupExtFirst, destDir: o.DestDir}
+}
+
 // legacyPreset names the preset that the flags -t, -e and -E stand for.
 func legacyPreset(opt Option) string {
 	switch {
@@ -146,7 +146,7 @@ func chooseNamer(opt Option, cfg config, args []string) (*namer, string, error) 
 	}
 	if legacy {
 		name := legacyPreset(opt)
-		return legacyNamer(opt), fmt.Sprintf("-t, -e and -E are going away: use --preset %q instead", name), nil
+		return legacyNamer(opt.legacy()), fmt.Sprintf("-t, -e and -E are going away: use --preset %q instead", name), nil
 	}
 	format := opt.Format
 	if opt.Preset != "" {
@@ -160,11 +160,41 @@ func chooseNamer(opt Option, cfg config, args []string) (*namer, string, error) 
 		format = cfg.Format
 	}
 	if format == "" {
-		return legacyNamer(opt), "", nil
+		return legacyNamer(opt.legacy()), "", nil
 	}
 	tpl, err := parseTemplate(format)
 	if err != nil {
 		return nil, "", fmt.Errorf("--format: %w", err)
 	}
 	return newNamer(tpl, args, opt.DestDir), "", nil
+}
+
+// saveFormat sets format in the configuration file at path: it replaces
+// the line of format, or adds one at the top, and keeps the rest, comments
+// included.
+func saveFormat(path, format string) error {
+	b, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	line := "format: " + strconv.Quote(format)
+	lines := strings.Split(string(b), "\n")
+	done := false
+	for i, l := range lines {
+		if strings.HasPrefix(l, "format:") {
+			lines[i], done = line, true
+			break
+		}
+	}
+	if !done {
+		if len(b) == 0 {
+			lines = []string{line, ""}
+		} else {
+			lines = append([]string{line}, lines...)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
 }

@@ -63,7 +63,7 @@ func TestTemplateRender(t *testing.T) {
 	// a camera model is one path segment; an unknown one is named so
 	for camera, want := range map[string]string{"iPhone 15 Pro": "iPhone_15_Pro", "A/B": "A_B", "": "unknown"} {
 		photo.Camera = camera
-		if got := photo.value("camera", ""); got != want {
+		if got := value(photo, "camera", ""); got != want {
 			t.Errorf("camera %q = %q, want %q", camera, got, want)
 		}
 	}
@@ -113,7 +113,7 @@ func TestLegacyNamerMatchesOldPaths(t *testing.T) {
 		for _, flags := range []struct{ t, e, E bool }{{}, {t: true}, {e: true}, {t: true, e: true}, {t: true, e: true, E: true}} {
 			opt := Option{DestDir: dest, GroupByDate: flags.t, GroupByExt: flags.e, GroupExtFirst: flags.E}
 			for _, p := range photos {
-				if got, want := legacyNamer(opt).target(p), oldBuildNewPath(p, opt); got != want {
+				if got, want := legacyNamer(opt.legacy()).target(p), oldBuildNewPath(p, opt); got != want {
 					t.Errorf("-d %q %+v %s: %q, want %q", dest, flags, p.Path, got, want)
 				}
 			}

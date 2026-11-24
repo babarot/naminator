@@ -585,7 +585,7 @@ func (c CLI) renameAndReport(photo Photo) {
 // buildNewPath computes the destination path for a photo based on options,
 // as the flags -t, -e, -E and -d name photos (see legacyNamer).
 func buildNewPath(photo Photo, opt Option) string {
-	return legacyNamer(opt).target(photo)
+	return legacyNamer(opt.legacy()).target(photo)
 }
 
 // pathReserver hands out destination paths so that no two photos in a run,

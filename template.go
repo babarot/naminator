@@ -90,13 +90,13 @@ func (t template) render(photo Photo, dir string) string {
 			b.WriteString(p.text)
 			continue
 		}
-		b.WriteString(photo.value(p.key, dir))
+		b.WriteString(value(photo, p.key, dir))
 	}
 	return b.String() + "." + photo.Extension
 }
 
 // value is the photo's value of a placeholder.
-func (p Photo) value(key, dir string) string {
+func value(p Photo, key, dir string) string {
 	at := p.CreatedAt
 	switch key {
 	case "date":
@@ -133,13 +133,16 @@ func (p Photo) value(key, dir string) string {
 	return ""
 }
 
-// presets are the built-in templates by name, in the order the interactive
-// screen goes through them. The flags -t, -e and -E name the ones marked.
-var presets = []struct {
+// preset is a template with a name.
+type preset struct {
 	name   string
 	format string
-	flags  string // the flags it stands for
-}{
+	flags  string // the flags it stands for, for a built-in one
+}
+
+// presets are the built-in templates by name, in the order the interactive
+// screen goes through them. The flags -t, -e and -E name the ones marked.
+var presets = []preset{
 	{"date and time", "{dir}/{date}_{time}", ""},
 	{"by date", "{date}/{date}_{time}", "-t"},
 	{"by extension", "{ext}/{date}_{time}", "-e"},
@@ -211,27 +214,33 @@ func argParent(args []string, path string) string {
 	return filepath.Dir(filepath.Clean(best))
 }
 
+// legacyFlags are the flags -t, -e, -E and -d.
+type legacyFlags struct {
+	byDate, byExt, extFirst bool
+	destDir                 string
+}
+
 // legacyNamer returns the namer for the flags -t, -e, -E and -d, as they
 // have always named photos: the date and time in the photo's directory, or
 // in the directory above it (-t, -e) or the destination (-d), in a
 // directory per date and extension.
-func legacyNamer(opt Option) *namer {
+func legacyNamer(f legacyFlags) *namer {
 	format := "{date}_{time}"
 	switch {
-	case opt.GroupByDate && opt.GroupByExt && opt.GroupExtFirst:
+	case f.byDate && f.byExt && f.extFirst:
 		format = "{ext}/{date}/{date}_{time}"
-	case opt.GroupByDate && opt.GroupByExt:
+	case f.byDate && f.byExt:
 		format = "{date}/{ext}/{date}_{time}"
-	case opt.GroupByDate:
+	case f.byDate:
 		format = "{date}/{date}_{time}"
-	case opt.GroupByExt:
+	case f.byExt:
 		format = "{ext}/{date}_{time}"
 	}
 	output := func(p Photo) string {
 		switch {
-		case opt.DestDir != "":
-			return opt.DestDir
-		case opt.GroupByDate || opt.GroupByExt:
+		case f.destDir != "":
+			return f.destDir
+		case f.byDate || f.byExt:
 			return filepath.Dir(p.Dir)
 		}
 		return p.Dir
