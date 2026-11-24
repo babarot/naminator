@@ -10,6 +10,22 @@
   · card/DSC00003.JPG  → ?
   · card/DSC00004.JPG  → ?
   · card/DSC00005.JPG  → ?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   fix the format to see the new paths
 
   i edit format • tab preset • j/k move • v tree • enter rename (fix the format) • q quit
@@ -39,9 +55,9 @@ L10 2-3 faint
 L10 23-26 faint
 L11 2-3 faint
 L11 23-26 faint
-L12 2-37 fg=c1
-L14 4-17 faint
-L14 22-30 faint
-L14 35-41 faint
-L14 44-82 faint
-L14 85-89 faint
+L28 2-37 fg=c1
+L30 4-17 faint
+L30 22-30 faint
+L30 35-41 faint
+L30 44-82 faint
+L30 85-89 faint

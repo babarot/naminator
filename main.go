@@ -311,6 +311,7 @@ func runMain() error {
 	}
 
 	model := newModel(first, cancel)
+	model.awaitReply = true
 	if title := model.startCompact(); title != "" {
 		fmt.Println(title)
 	}
@@ -387,17 +388,26 @@ func (c CLI) runProgram(p *tea.Program, work func()) (tea.Model, error) {
 		defer close(done)
 		work()
 	}()
-	// A signal stops the run as Ctrl+C does. After the first, the default
-	// handling is back, so a second one ends the process at once.
+	// A signal stops the run as Ctrl+C does, for as long as p runs: the
+	// work can end long before it, as the reading under the screen does.
+	// After the first, the default handling is back, so a second one ends
+	// the process at once.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sig)
+	ran := make(chan struct{})
+	defer close(ran)
 	go func() {
 		select {
 		case <-sig:
 			signal.Stop(sig)
+			// canceled also when p has just ended: the next program, if
+			// any, is not started
+			if c.cancel != nil {
+				c.cancel()
+			}
 			p.Send(interruptMsg{})
-		case <-done:
+		case <-ran:
 		}
 	}()
 	final, err := p.Run()

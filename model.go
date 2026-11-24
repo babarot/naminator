@@ -32,7 +32,21 @@ type model struct {
 	stopped  bool // Ctrl+C was pressed
 	cancel   func()
 	now      func() time.Time
+	// awaitReply makes the program ask the terminal where the cursor is,
+	// and quit only once it has answered (replied), or after replyWait.
+	// bubbletea asks the terminal about its modes as it starts, and a run
+	// that ends before the answers arrive leaves them in the shell, where
+	// they show: the terminal answers in order, so once the cursor's
+	// position has come, the answers before it have been read.
+	awaitReply bool
+	replied    bool
 }
+
+// replyWait is how long the program waits for the terminal to answer.
+const replyWait = 500 * time.Millisecond
+
+// repliedMsg says the wait for the terminal's answer is over.
+type repliedMsg struct{}
 
 // printedMsg reports that a batch of queued lines has been printed.
 type printedMsg struct{}
@@ -77,7 +91,10 @@ func (m *model) startCompact() string {
 }
 
 func (m model) Init() tea.Cmd {
-	return m.spinner.Tick
+	if !m.awaitReply {
+		return m.spinner.Tick
+	}
+	return tea.Batch(m.spinner.Tick, tea.RequestCursorPosition, tea.Tick(replyWait, func(time.Time) tea.Msg { return repliedMsg{} }))
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -109,6 +126,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case printedMsg:
 		m.printing = false
+		return m, m.flush()
+
+	case tea.CursorPositionMsg, repliedMsg:
+		m.replied = true
 		return m, m.flush()
 
 	case tea.KeyPressMsg:
@@ -207,7 +228,7 @@ func (m *model) flush() tea.Cmd {
 		m.printing = true
 		return tea.Sequence(tea.Println(text), func() tea.Msg { return printedMsg{} })
 	}
-	if m.finished {
+	if m.finished && (m.replied || !m.awaitReply) {
 		return tea.Quit
 	}
 	return nil

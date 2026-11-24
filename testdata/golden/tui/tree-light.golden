@@ -9,7 +9,23 @@
   ├─ 2026-10-04_14-22-01.jpg    ← card/DSC00001.JPG
   ├─ 2026-10-04_14-22-01_1.jpg  ← card/DSC00002.JPG  _1
   ├─ 2026-10-04_14-22-03.jpg    ← card/DSC00003.JPG
-     ↓ 3 more  (ctrl+d)
+  ├─ 2026-10-04_14-22-04.jpg    ← card/DSC00004.JPG
+  ├─ ⋯ 4 more files
+  └─ 2026-10-04_14-22-09.jpg    ← card/DSC00009.JPG
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   10 to rename · 1 numbered
 
   i edit format • tab preset • j/k move • h/l fold • v list • enter rename… • ctrl+s save • q quit
@@ -42,14 +58,18 @@ L9 32-51 faint
 L9 53-55 fg=c3
 L10 2-4 faint
 L10 32-51 faint
-L11 5-23 faint
-L12 15-16 faint
-L12 17-27 fg=c3
-L14 4-17 faint
-L14 22-30 faint
-L14 35-41 faint
-L14 46-52 faint
-L14 55-61 faint
-L14 68-77 faint
-L14 85-91 faint
-L14 94-98 faint
+L11 2-4 faint
+L11 32-51 faint
+L12 2-19 faint
+L13 2-4 faint
+L13 32-51 faint
+L28 15-16 faint
+L28 17-27 fg=c3
+L30 4-17 faint
+L30 22-30 faint
+L30 35-41 faint
+L30 46-52 faint
+L30 55-61 faint
+L30 68-77 faint
+L30 85-91 faint
+L30 94-98 faint

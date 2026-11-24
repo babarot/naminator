@@ -99,13 +99,6 @@ type tuiModel struct {
 	cfgPath string
 	presets []preset
 	cancel  func()
-	// runBase and runInto name where the photos are, for the run's display
-	runBase string
-	runInto bool
-	// decided tells the work what to do once the screen is done
-	decided chan<- tuiDecision
-	// run is the usual display, which takes over once confirmed
-	run *model
 
 	rows   []*tuiRow
 	byKey  map[string]*tuiRow
@@ -129,14 +122,6 @@ type tuiModel struct {
 	// dark tells the terminal's background, for the color of the cursor's
 	// line
 	dark bool
-	// cursorY is the row the prompt left the cursor on, -1 until the
-	// terminal tells; settled is set once it has, or the wait is over:
-	// nothing is drawn before, so that the answer is where the prompt is
-	cursorY int
-	settled bool
-	// peak is the most lines the screen has drawn: the terminal scrolled
-	// up for them, and the screen stays where they put it when it shrinks
-	peak int
 
 	insert  bool
 	confirm bool
@@ -159,7 +144,6 @@ func newTUIModel(args, images []string, format, destDir string, dry, clean bool,
 		byKey:    map[string]*tuiRow{},
 		folded:   map[string]bool{},
 		expanded: map[string]bool{},
-		cursorY:  -1,
 		width:    width,
 		height:   height,
 		spinner:  spinner.New(spinner.WithSpinner(spinner.Jump), spinner.WithStyle(Cyan)),
@@ -173,19 +157,7 @@ func newTUIModel(args, images []string, format, destDir string, dry, clean bool,
 	return m
 }
 
-func (m tuiModel) Init() tea.Cmd {
-	// The screen reaches from the prompt down, as gomi's does: ask where
-	// the cursor is before drawing; a terminal that does not tell gets
-	// half its rows after a while
-	return tea.Batch(m.spinner.Tick, tea.RequestCursorPosition, tea.Tick(cursorWait, func(time.Time) tea.Msg { return cursorWaitedMsg{} }))
-}
-
-// cursorWait is how long the screen waits for the terminal to tell where
-// the cursor is before drawing without it.
-var cursorWait = 250 * time.Millisecond
-
-// cursorWaitedMsg says the wait for the cursor position is over.
-type cursorWaitedMsg struct{}
+func (m tuiModel) Init() tea.Cmd { return m.spinner.Tick }
 
 // setFormat sets the format, puts the cursor at its end, and plans again.
 func (m *tuiModel) setFormat(f string) {
@@ -252,55 +224,24 @@ func (m tuiModel) photos() []Photo {
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
-	if tm, ok := next.(tuiModel); ok && tm.run == nil {
+	if tm, ok := next.(tuiModel); ok {
 		// The lines can be fewer after a photo is read or the format
 		// changes: keep the cursor on one of them
 		tm.sel = max(0, min(tm.sel, len(tm.items())-1))
 		// keep the lines shown, moving them only to keep the cursor in
 		tm.top = tm.window().top
-		if tm.settled {
-			tm.peak = max(tm.peak, tm.viewHeight())
-		}
 		return tm, cmd
 	}
 	return next, cmd
 }
 
 func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.run != nil {
-		next, cmd := m.run.Update(msg)
-		run, _ := next.(model)
-		m.run = &run
-		return m, cmd
-	}
-	// Confirmed, the screen waits a frame before the display takes over:
-	// nothing may change the format confirmed, only Ctrl+C give up.
-	if m.result == tuiConfirmed {
-		switch msg := msg.(type) {
-		case handoverMsg:
-			return m.handover()
-		case interruptMsg:
-			return m.end(tuiCanceled)
-		case tea.KeyPressMsg:
-			if msg.String() == "ctrl+c" {
-				return m.end(tuiCanceled)
-			}
-		}
+	if m.result != tuiRunning {
 		return m, nil
 	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		return m, nil
-
-	case tea.CursorPositionMsg:
-		// it may come after the wait; asked before anything was drawn, it
-		// still tells where the prompt left the cursor
-		m.cursorY, m.settled = msg.Y, true
-		return m, nil
-
-	case cursorWaitedMsg:
-		m.settled = true
 		return m, nil
 
 	case exifResultMsg:
@@ -336,38 +277,20 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// end closes the screen. When confirmed, the usual display takes over
-// from the rename phase, and the program quits once the run is done;
-// otherwise the EXIF reading stops and the program quits.
+// end closes the screen with r. Unless confirmed, the EXIF reading stops.
+// What was decided is read from the final model (decision), and the run
+// is another program.
 func (m tuiModel) end(r tuiResult) (tea.Model, tea.Cmd) {
 	m.result = r
-	if r != tuiConfirmed {
-		m.decide()
-		if m.cancel != nil {
-			m.cancel()
-		}
-		return m, tea.Quit
+	if r != tuiConfirmed && m.cancel != nil {
+		m.cancel()
 	}
-	// Let a frame without the screen be drawn first: the display drawn
-	// over the taller screen at once would leave lines of it behind.
-	return m, tea.Tick(handoverDelay, func(time.Time) tea.Msg { return handoverMsg{} })
+	return m, tea.Quit
 }
 
-// handoverMsg hands the program over to the usual display, after a frame
-// without the screen.
-type handoverMsg struct{}
-
-// handoverDelay is how long the empty frame is given: more than a frame at
-// the renderer's 60 FPS.
-const handoverDelay = 50 * time.Millisecond
-
-// decide tells the work what the screen decided. When confirmed, it is
-// told once the display has taken over, so that the renames it reports
-// reach the display.
-func (m tuiModel) decide() {
-	if m.decided == nil {
-		return
-	}
+// decision is what the screen decided: the format, where each photo goes,
+// and the photos to report or to rename by the file's time.
+func (m tuiModel) decision() tuiDecision {
 	d := tuiDecision{result: m.result, format: m.format, targets: map[string]string{}}
 	for _, row := range m.rows {
 		if row.usable() && row.target != "" {
@@ -380,28 +303,14 @@ func (m tuiModel) decide() {
 			d.fileTime = append(d.fileTime, row.photo)
 		}
 	}
-	m.decided <- d
-}
-
-// handover makes the usual display, from the rename phase, take over.
-func (m tuiModel) handover() (tea.Model, tea.Cmd) {
-	photos := m.photos()
-	sortByTime(photos)
-	run := newModel(phaseStartMsg{kind: phaseRename, keys: pathsOf(photos), base: m.runBase, into: m.runInto, dry: m.dry}, m.cancel)
-	run.width, run.height = m.width, m.height
-	if run.phase.wantCompact(run.height) {
-		run.phase.compact = true
-		run.queue = append(run.queue, run.phase.title(), "")
-	}
-	cmd := run.flush()
-	m.run = &run
-	m.decide()
-	return m, tea.Batch(cmd, run.Init())
+	return d
 }
 
 // ready reports whether the photos can be renamed, and why not.
 func (m tuiModel) ready() (bool, string) {
 	switch {
+	case m.tooLow():
+		return false, "the terminal is too low"
 	case m.nRead < len(m.rows):
 		return false, "after EXIF"
 	case m.tplErr != "":
@@ -669,25 +578,20 @@ func saveFormat(path, format string) error {
 // has, within the screen less the header, the format's box, the parts,
 // the counts, a line and the keys.
 func (m tuiModel) listHeight() int {
-	return max(0, min(len(m.items()), m.maxHeight()-m.fixedLines()))
-}
-
-// tight reports whether the terminal is too low for every line: the parts
-// and the notice are then left out.
-func (m tuiModel) tight() bool {
-	return m.height > 0 && m.height-1 < 11
+	return max(0, m.height-fixedLines)
 }
 
 // fixedLines counts the lines besides the list: the header, the format's
-// box, the parts, the counts, a line and the keys; two fewer when tight.
-func (m tuiModel) fixedLines() int {
-	switch {
-	case m.tight() && m.tplErr != "":
-		return 7 // the error stays
-	case m.tight():
-		return 6
-	}
-	return 8
+// box, the parts, the counts, a line and the keys.
+const fixedLines = 8
+
+// minHeight is the lowest terminal the screen is drawn on: below, the
+// keys and the question would be cut off, and nothing can be confirmed.
+const minHeight = fixedLines + 3
+
+// tooLow reports whether the terminal is lower than minHeight.
+func (m tuiModel) tooLow() bool {
+	return m.height > 0 && m.height < minHeight
 }
 
 // resetSGR matches the resets of the styles, after which the background of
@@ -712,35 +616,17 @@ func (m tuiModel) highlight(line string, width int) string {
 	return bg + padRight(line, width) + "\x1b[49m"
 }
 
-// viewHeight is how many lines the screen takes: what it has to show.
-func (m tuiModel) viewHeight() int {
-	return m.listHeight() + m.fixedLines()
-}
-
-// maxHeight is the most lines the screen takes, as gomi's "auto" height:
-// half the terminal, or the rows from the prompt down when there are more,
-// less a line for the cursor, and at least a few rows of the list.
-func (m tuiModel) maxHeight() int {
-	n := m.height / 2
-	if m.cursorY >= 0 {
-		n = max(n, m.height-m.cursorY)
-	}
-	n = max(11, min(n, m.height)-1)
-	if m.height > 0 {
-		// never taller than the terminal, less the cursor's line
-		n = min(n, m.height-1)
-	}
-	return n
-}
-
+// View draws the screen on the alternate screen, which is left when the
+// program ends: the run is drawn after it, in the shell's scrollback.
 func (m tuiModel) View() tea.View {
-	if m.run != nil {
-		return m.run.View()
+	// The last frame stays on the alternate screen too: leaving it for the
+	// main screen there would draw an empty frame over the lines above.
+	v := tea.NewView("")
+	v.AltScreen = true
+	if m.result != tuiRunning {
+		return v
 	}
-	if m.result != tuiRunning || !m.settled {
-		return tea.NewView("")
-	}
-	v := tea.NewView(strings.Join(m.lines(time.Now()), "\n"))
+	v.SetContent(strings.Join(m.lines(time.Now()), "\n"))
 	if m.mouseOn() {
 		v.MouseMode = tea.MouseModeCellMotion
 	}
@@ -749,6 +635,9 @@ func (m tuiModel) View() tea.View {
 
 func (m tuiModel) lines(now time.Time) []string {
 	w := m.width
+	if m.tooLow() {
+		return []string{fitLine(fmt.Sprintf(" naminator needs a terminal of %d lines or more (q quits)", minHeight), w)}
+	}
 	var lines []string
 	// the header
 	left := " " + Bold.Render("naminator") + "  " + fmt.Sprintf("%d %s in %s", len(m.rows), plural(len(m.rows), "photo", "photos"), m.where())
@@ -779,11 +668,8 @@ func (m tuiModel) lines(now time.Time) []string {
 	lines = append(lines, border.Render("│")+padRight(body, inner)+border.Render("│"))
 	lines = append(lines, border.Render("╰"+strings.Repeat("─", max(0, inner))+"╯"))
 
-	// the parts of the selected photo, or what is wrong with the format;
-	// the error stays on a low terminal, the parts do not
-	if m.tight() && m.tplErr == "" {
-		// left out
-	} else if m.tplErr != "" {
+	// the parts of the selected photo, or what is wrong with the format
+	if m.tplErr != "" {
 		lines = append(lines, fitLine("  "+Red.Render(iconError+" "+m.tplErr), w))
 	} else {
 		lines = append(lines, fitLine(m.partsLine(), w))
@@ -805,12 +691,14 @@ func (m tuiModel) lines(now time.Time) []string {
 	if win.down {
 		lines = append(lines, fitLine("     "+Dim.Render(fmt.Sprintf("↓ %d more  (ctrl+d)", len(items)-win.top-win.rows)), w))
 	}
+	// the counts and the keys stay at the bottom of the screen
+	for range m.listHeight() - win.rows - btoi(win.up) - btoi(win.down) {
+		lines = append(lines, "")
+	}
 
 	// what the photos would get, then the keys
 	lines = append(lines, fitLine(m.countLine(), w))
-	if !m.tight() {
-		lines = append(lines, fitLine("  "+m.notice, w))
-	}
+	lines = append(lines, fitLine("  "+m.notice, w))
 	lines = append(lines, fitLine("  "+m.help(), w))
 	return lines
 }

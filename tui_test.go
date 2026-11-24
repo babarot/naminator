@@ -167,8 +167,6 @@ func TestTUIPresets(t *testing.T) {
 
 func TestTUIConfirm(t *testing.T) {
 	m, photos := newTestTUI(t, 3)
-	decided := make(chan tuiDecision, 1)
-	m.decided = decided
 
 	// not before every photo is read
 	m = m.send(t, readAll(photos[:2])...)
@@ -182,43 +180,19 @@ func TestTUIConfirm(t *testing.T) {
 	if m.confirm || m.result != tuiRunning {
 		t.Fatalf("confirm = %v, result = %v", m.confirm, m.result)
 	}
-	// y confirms; the display takes over after a frame, and only then is
-	// the work told, so that the renames reach the display
+	// y confirms and ends the screen; what was decided is read from it
 	m = m.send(t, keys("enter", "y")...)
-	if m.result != tuiConfirmed || len(decided) != 0 {
-		t.Fatalf("result = %v, decided %d", m.result, len(decided))
+	if m.result != tuiConfirmed || m.View().Content != "" {
+		t.Fatalf("result = %v, view %q", m.result, m.View().Content)
 	}
-	if m.View().Content != "" {
-		t.Error("the screen should be gone before the display takes over")
+	// nothing changes what was confirmed afterwards
+	m = m.send(t, append(keys("tab", "i", "x", "ctrl+c"), interruptMsg{})...)
+	if m.format != presets[0].format || m.insert || m.result != tuiConfirmed {
+		t.Fatalf("format = %q, insert = %v, result = %v after the confirmation", m.format, m.insert, m.result)
 	}
-	// while it waits, nothing changes the format confirmed
-	m = m.send(t, keys("tab", "i", "x")...)
-	if m.format != presets[0].format || m.insert {
-		t.Fatalf("format = %q, insert = %v after the confirmation", m.format, m.insert)
-	}
-	m = m.send(t, handoverMsg{})
-	if m.run == nil || len(decided) != 1 {
-		t.Fatalf("run = %v, decided %d", m.run, len(decided))
-	}
-	if d := <-decided; d.format != presets[0].format {
-		t.Errorf("decided %+v", d)
-	}
-}
-
-// Ctrl+C while the display is about to take over gives up, and tells the
-// work so.
-func TestTUICancelAfterConfirm(t *testing.T) {
-	m, photos := newTestTUI(t, 1)
-	decided := make(chan tuiDecision, 1)
-	m.decided = decided
-	m = m.send(t, readAll(photos)...)
-	m = m.send(t, keys("enter", "y", "ctrl+c")...)
-	m = m.send(t, handoverMsg{})
-	if m.result != tuiCanceled || m.run != nil || len(decided) != 1 {
-		t.Fatalf("result = %v, run = %v, decided %d", m.result, m.run, len(decided))
-	}
-	if d := <-decided; d.result != tuiCanceled {
-		t.Errorf("decided %+v", d)
+	d := m.decision()
+	if d.format != presets[0].format || len(d.targets) != 3 || d.targets[photos[1].Path] != "card/2026-10-04_14-22-01.jpg" {
+		t.Errorf("decision %+v", d)
 	}
 }
 
@@ -230,11 +204,9 @@ func TestTUIQuit(t *testing.T) {
 		m, _ := newTestTUI(t, 2)
 		canceled := false
 		m.cancel = func() { canceled = true }
-		decided := make(chan tuiDecision, 1)
-		m.decided = decided
 		m = m.send(t, keys(tt.key)...)
-		if m.result != tt.want || !canceled || len(decided) != 1 {
-			t.Errorf("%s: result = %v, canceled = %v, decided %d", tt.key, m.result, canceled, len(decided))
+		if m.result != tt.want || !canceled {
+			t.Errorf("%s: result = %v, canceled = %v", tt.key, m.result, canceled)
 		}
 	}
 	// a signal is Ctrl+C
@@ -256,7 +228,7 @@ func TestTUIView(t *testing.T) {
 			m.insert, m.view = mode.insert, mode.view
 			insert := mode.insert
 			lines := m.lines(time.Now())
-			if len(lines) > m.viewHeight() || len(lines)+1 > max(size[1], 13) {
+			if len(lines) != size[1] {
 				t.Errorf("%v insert=%v: %d lines", size, insert, len(lines))
 			}
 			for _, l := range lines {
@@ -492,8 +464,6 @@ func TestTUITreeFold(t *testing.T) {
 // and takes it back.
 func TestTUIFileTime(t *testing.T) {
 	m := newCardsTUI(t)
-	decided := make(chan tuiDecision, 1)
-	m.decided = decided
 	r := m.rows[7] // read without a shooting time
 	mtime := time.Date(2026, 10, 6, 18, 2, 11, 0, time.Local)
 	if err := os.Chtimes(r.key, mtime, mtime); err != nil {
@@ -529,8 +499,7 @@ func TestTUIFileTime(t *testing.T) {
 	}
 	// renamed with the others once confirmed, and not reported as failed
 	m = m.send(t, keys("enter", "y")...)
-	m = m.send(t, handoverMsg{})
-	d := <-decided
+	d := m.decision()
 	if len(d.fileTime) != 1 || d.fileTime[0].Path != r.key || len(d.failed) != 0 {
 		t.Errorf("decided %+v", d)
 	}
@@ -623,40 +592,6 @@ func TestStartFormatWithDest(t *testing.T) {
 	}
 }
 
-// The screen takes the lines it has to show, at most half the terminal or
-// the rows from the prompt down, as gomi's; nothing is drawn until the
-// terminal tells where the prompt is, or the wait is over.
-func TestTUIHeight(t *testing.T) {
-	m, photos := newTestTUI(t, 3)
-	m.width, m.height = 100, 40
-	m = m.send(t, readAll(photos)...)
-	if m.View().Content != "" {
-		t.Fatal("nothing should be drawn before the cursor position")
-	}
-	m = m.send(t, cursorWaitedMsg{})
-	if got := len(m.lines(time.Now())); got != 3+8 {
-		t.Errorf("3 photos: %d lines, want %d", got, 3+8)
-	}
-
-	many, photos := newTestTUI(t, 100)
-	many.width, many.height = 100, 40
-	many = many.send(t, readAll(photos)...)
-	many = many.send(t, cursorWaitedMsg{})
-	if got := len(many.lines(time.Now())); got != 40/2-1 {
-		t.Errorf("100 photos, cursor unknown: %d lines, want %d", got, 40/2-1)
-	}
-	// the prompt near the top: the rows from it down
-	many = many.send(t, tea.CursorPositionMsg{X: 0, Y: 5})
-	if got := len(many.lines(time.Now())); got != 40-5-1 {
-		t.Errorf("100 photos, prompt on row 5: %d lines, want %d", got, 40-5-1)
-	}
-	// the prompt near the bottom: half the terminal
-	many = many.send(t, tea.CursorPositionMsg{X: 0, Y: 35})
-	if got := len(many.lines(time.Now())); got != 40/2-1 {
-		t.Errorf("100 photos, prompt on row 35: %d lines, want %d", got, 40/2-1)
-	}
-}
-
 // Photos already named are not renamed: with nothing to move, enter does
 // not ask, and the question counts only the photos that move.
 func TestTUIConfirmCountsMoves(t *testing.T) {
@@ -688,34 +623,10 @@ func TestTUIWhere(t *testing.T) {
 	}
 }
 
-// On a low terminal the screen leaves lines out rather than get taller
-// than the terminal, whose top would then be cut off.
-func TestTUILowTerminal(t *testing.T) {
-	m, photos := newTestTUI(t, 30)
-	m = m.send(t, readAll(photos)...)
-	m = m.send(t, cursorWaitedMsg{})
-	for h := 8; h <= 14; h++ {
-		for _, mode := range []struct {
-			view   tuiView
-			format string
-		}{{viewList, presets[0].format}, {viewTree, presets[0].format}, {viewList, "{nope}"}} {
-			m.height, m.view = h, mode.view
-			m.setFormat(mode.format)
-			lines := m.lines(time.Now())
-			if len(lines) > h-1 {
-				t.Errorf("height %d, %v, %q: %d lines", h, mode.view, mode.format, len(lines))
-			}
-			if !strings.Contains(ansi.Strip(lines[len(lines)-1]), "q quit") && !strings.Contains(ansi.Strip(lines[len(lines)-1]), "enter") {
-				t.Errorf("height %d: the last line should be the keys, got %q", h, ansi.Strip(lines[len(lines)-1]))
-			}
-		}
-	}
-}
-
 // click clicks at column x of line y of the screen, drawn from the row
 // the prompt is on.
 func click(m tuiModel, x, y int) tea.Msg {
-	return tea.MouseClickMsg{X: x, Y: m.frameTop() + y, Button: tea.MouseLeft}
+	return tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft}
 }
 
 // find returns the line and column where s is drawn on the screen.
@@ -731,15 +642,14 @@ func find(t *testing.T, m tuiModel, s string) (x, y int) {
 	return 0, 0
 }
 
-func newMouseTUI(t *testing.T, n, cursorY int) tuiModel {
+func newMouseTUI(t *testing.T, n int) tuiModel {
 	t.Helper()
 	m, photos := newTestTUI(t, n)
-	m = m.send(t, readAll(photos)...)
-	return m.send(t, tea.CursorPositionMsg{Y: cursorY})
+	return m.send(t, readAll(photos)...)
 }
 
 func TestTUIMouseWheel(t *testing.T) {
-	m := newMouseTUI(t, 10, 3)
+	m := newMouseTUI(t, 10)
 	if m.View().MouseMode != tea.MouseModeCellMotion {
 		t.Fatal("the screen should take the mouse")
 	}
@@ -761,7 +671,7 @@ func TestTUIMouseWheel(t *testing.T) {
 }
 
 func TestTUIMouseClickList(t *testing.T) {
-	m := newMouseTUI(t, 10, 3)
+	m := newMouseTUI(t, 10)
 	x, y := find(t, m, "DSC00004.JPG")
 	m = m.send(t, click(m, x, y))
 	if r := m.items()[m.sel].row; r == nil || r.photo.Name != "DSC00004.JPG" {
@@ -788,7 +698,7 @@ func TestTUIMouseClickList(t *testing.T) {
 }
 
 func TestTUIMouseClickHeaderAndFormat(t *testing.T) {
-	m := newMouseTUI(t, 4, 3)
+	m := newMouseTUI(t, 4)
 	x, y := find(t, m, "view: list")
 	m = m.send(t, click(m, x+7, y))
 	if m.view != viewTree {
@@ -826,16 +736,9 @@ func TestTUIMouseClickHeaderAndFormat(t *testing.T) {
 	}
 }
 
-// The mouse does nothing while the screen asks y/N, and before the
-// terminal told where the screen is.
+// The mouse does nothing while the screen asks y/N.
 func TestTUIMouseOff(t *testing.T) {
-	m, photos := newTestTUI(t, 4)
-	m = m.send(t, readAll(photos)...)
-	m = m.send(t, cursorWaitedMsg{})
-	if m.View().MouseMode != tea.MouseModeNone {
-		t.Error("without the cursor position the screen should not take the mouse")
-	}
-	m = newMouseTUI(t, 4, 3)
+	m := newMouseTUI(t, 4)
 	m = m.send(t, keys("enter")...)
 	if !m.confirm || m.View().MouseMode != tea.MouseModeNone {
 		t.Fatalf("confirm = %v, mouse = %v", m.confirm, m.View().MouseMode)
@@ -843,20 +746,6 @@ func TestTUIMouseOff(t *testing.T) {
 	m = m.send(t, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
 	if m.sel != 0 || !m.confirm {
 		t.Errorf("the wheel should do nothing while asking, sel = %d", m.sel)
-	}
-}
-
-// The screen's top row: from the prompt, or higher when the terminal
-// scrolled for it, and it stays there when the screen gets fewer lines.
-func TestTUIFrameTop(t *testing.T) {
-	m := newMouseTUI(t, 10, 25) // 18 lines from row 25 of 30
-	if got, want := m.frameTop(), 30-m.viewHeight(); got != want {
-		t.Errorf("frameTop = %d, want %d", got, want)
-	}
-	top := m.frameTop()
-	m = m.send(t, keys("v", "g", "h")...) // the tree, folded to its top
-	if m.frameTop() != top {
-		t.Errorf("frameTop = %d after the screen shrank, want %d", m.frameTop(), top)
 	}
 }
 
@@ -910,7 +799,7 @@ func TestTUITreeArrows(t *testing.T) {
 // ctrl+d and ctrl+u, as page down and page up, move the cursor and the
 // lines shown by a page.
 func TestTUIPage(t *testing.T) {
-	m := newMouseTUI(t, 60, 0)
+	m := newMouseTUI(t, 100)
 	// each ctrl+d puts the cursor on the first line not shown before, and
 	// shows the lines from it
 	for range 2 {
@@ -920,12 +809,12 @@ func TestTUIPage(t *testing.T) {
 			t.Fatalf("ctrl+d: sel = %d, top = %d, want %d", m.sel, m.window().top, want)
 		}
 	}
-	m = m.send(t, keys("ctrl+d", "ctrl+d", "ctrl+d")...)
-	if w := m.window(); m.sel != 59 || w.top+w.rows != 60 || w.down {
+	m = m.send(t, keys("ctrl+d", "ctrl+d", "ctrl+d", "ctrl+d", "ctrl+d")...)
+	if w := m.window(); m.sel != 99 || w.top+w.rows != 100 || w.down {
 		t.Errorf("ctrl+d at the end: sel = %d, window = %+v", m.sel, w)
 	}
 	m = m.send(t, keys("ctrl+u")...)
-	if w := m.window(); m.sel >= 59 || m.sel < w.top || m.sel >= w.top+w.rows {
+	if w := m.window(); m.sel >= 99 || m.sel < w.top || m.sel >= w.top+w.rows {
 		t.Errorf("ctrl+u: sel = %d, window = %+v", m.sel, w)
 	}
 	m = m.send(t, tea.KeyPressMsg{Code: tea.KeyPgUp}, tea.KeyPressMsg{Code: tea.KeyPgUp}, tea.KeyPressMsg{Code: tea.KeyPgUp}, tea.KeyPressMsg{Code: tea.KeyPgUp})
@@ -938,7 +827,7 @@ func TestTUIPage(t *testing.T) {
 // below, and above once it has moved; the cursor always stays on a line
 // shown, and the list never takes more lines than it has.
 func TestTUIMoreLines(t *testing.T) {
-	m := newMouseTUI(t, 60, 0)
+	m := newMouseTUI(t, 60)
 	n := m.listHeight()
 	text := func() string { return ansi.Strip(strings.Join(m.lines(time.Now()), "\n")) }
 	if !strings.Contains(text(), fmt.Sprintf("↓ %d more", 60-(n-1))) || strings.Contains(text(), "↑") {
@@ -962,8 +851,35 @@ func TestTUIMoreLines(t *testing.T) {
 		t.Errorf("a click on ↓ should page down, sel = %d", m.sel)
 	}
 	// everything fits: no lines for more
-	few := newMouseTUI(t, 3, 0)
+	few := newMouseTUI(t, 3)
 	if s := ansi.Strip(strings.Join(few.lines(time.Now()), "\n")); strings.Contains(s, "more  (ctrl") {
 		t.Errorf("3 photos:\n%s", s)
+	}
+}
+
+// The screen is drawn on the alternate screen, over the whole terminal,
+// with the counts and the keys at its bottom; a terminal too low for them
+// says so and confirms nothing.
+func TestTUIAltScreen(t *testing.T) {
+	m, photos := newTestTUI(t, 3)
+	m = m.send(t, readAll(photos)...)
+	v := m.View()
+	if !v.AltScreen || v.MouseMode != tea.MouseModeCellMotion {
+		t.Errorf("alt screen = %v, mouse = %v", v.AltScreen, v.MouseMode)
+	}
+	lines := m.lines(time.Now())
+	if len(lines) != m.height || !strings.Contains(ansi.Strip(lines[len(lines)-1]), "q quit") {
+		t.Errorf("%d lines for %d rows, last %q", len(lines), m.height, ansi.Strip(lines[len(lines)-1]))
+	}
+
+	m.height = minHeight - 1
+	if lines := m.lines(time.Now()); len(lines) != 1 || !strings.Contains(ansi.Strip(lines[0]), "needs a terminal of") {
+		t.Errorf("too low: %q", lines)
+	}
+	if m = m.send(t, keys("enter", "y")...); m.confirm || m.result != tuiRunning {
+		t.Errorf("too low: confirm = %v, result = %v", m.confirm, m.result)
+	}
+	if m = m.send(t, keys("q")...); m.result != tuiQuit {
+		t.Errorf("too low: q gives %v", m.result)
 	}
 }

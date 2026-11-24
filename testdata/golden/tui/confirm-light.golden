@@ -10,6 +10,22 @@
   ~ card/DSC00003.JPG  → card/2026-10-04_14-22-03.jpg
   ~ card/DSC00004.JPG  → card/2026-10-04_14-22-04.jpg
   ~ card/DSC00005.JPG  → card/2026-10-04_14-22-05.jpg
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   6 to rename · 1 numbered
 
   Rename 6 photos? y/N
@@ -55,9 +71,9 @@ L10 2-3 fg=c3
 L10 23-24 faint
 L11 2-3 fg=c3
 L11 23-24 faint
-L12 14-15 faint
-L12 16-26 fg=c3
-L14 2-18 fg=c3
-L14 19-20 bold
-L14 20-21 faint
-L14 21-22 bold
+L28 14-15 faint
+L28 16-26 fg=c3
+L30 2-18 fg=c3
+L30 19-20 bold
+L30 20-21 faint
+L30 21-22 bold
