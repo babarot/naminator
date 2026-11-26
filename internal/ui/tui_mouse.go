@@ -129,6 +129,7 @@ func (m *tuiModel) clickList(i int) {
 		m.sel = i
 		return
 	}
+	m.gen++
 	it := items[i]
 	switch it.kind {
 	case itemRoot:

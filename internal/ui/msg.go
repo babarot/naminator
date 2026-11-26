@@ -53,6 +53,9 @@ type exifResultMsg struct {
 	err      error
 }
 
+// exifResultsMsg are the results gathered since the last told (gatherer).
+type exifResultsMsg []exifResultMsg
+
 type renameResultMsg struct {
 	photo  photo.Photo
 	dryrun bool

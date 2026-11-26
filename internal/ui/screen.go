@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"time"
+
+	"github.com/babarot/naminator/internal/photo"
 	"github.com/babarot/naminator/internal/rename"
 	"github.com/babarot/naminator/internal/ui/theme"
 
@@ -30,8 +33,18 @@ type ScreenOptions struct {
 // as the work reads their EXIF data (Tracker), and ends once decided.
 type Screen struct {
 	Tracker
-	p      *tea.Program
-	cancel func()
+	p       *tea.Program
+	results *gatherer
+	cancel  func()
+}
+
+// ReadStart tells nothing: the screen shows which photos are read, not
+// which are being read.
+func (s *Screen) ReadStart(string) {}
+
+// ReadDone tells that the EXIF data of image was read, or why not.
+func (s *Screen) ReadDone(image string, p photo.Photo, took time.Duration, err error) {
+	s.results.add(exifResultMsg{image: image, photo: p, duration: took, err: err})
 }
 
 // NewScreen returns the interactive screen, which is drawn on the alternate
@@ -44,7 +57,11 @@ func NewScreen(o ScreenOptions) *Screen {
 
 // Do runs the screen while work runs, and returns what was decided.
 func (s *Screen) Do(work func()) (Decision, error) {
-	final, err := runProgram(s.p, s.cancel, work)
+	s.results = newGatherer(s.p, gatherEvery)
+	final, err := runProgram(s.p, s.cancel, func() {
+		work()
+		s.results.close()
+	})
 	if err != nil {
 		return Decision{}, err
 	}
