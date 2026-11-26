@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.3.1](https://github.com/babarot/naminator/compare/v0.3.0...v0.3.1) - 2026-11-26
+
+### Improvements
+- Pin the screens with golden views by @babarot in https://github.com/babarot/naminator/pull/63
+- Draw the interactive screen on the alternate screen by @babarot in https://github.com/babarot/naminator/pull/65
+- Move the photos, the naming and the configuration into packages by @babarot in https://github.com/babarot/naminator/pull/66
+- Move the screens and the command line into packages by @babarot in https://github.com/babarot/naminator/pull/67
+- Bind keys to actions by name by @babarot in https://github.com/babarot/naminator/pull/69
+- Keep the colors in a theme, and the styles in the models by @babarot in https://github.com/babarot/naminator/pull/70
+- Show what happened for a moment, by kind by @babarot in https://github.com/babarot/naminator/pull/71
+- Keep the interactive screen fast with thousands of photos by @babarot in https://github.com/babarot/naminator/pull/73
+
 ## [v0.3.0](https://github.com/babarot/naminator/compare/v0.2.7...v0.3.0) - 2026-11-23
 
 ### New Features
